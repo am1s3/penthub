@@ -14,6 +14,20 @@ import {
   audit
 } from '../../_utils.js';
 
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) {
+    return false;
+  }
+
+  let diff = 0;
+
+  for (let i = 0; i < a.length; i += 1) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+
+  return diff === 0;
+}
+
 export async function onRequest({ request, env }) {
   if (request.method !== 'POST') {
     return json({ error: 'Method not allowed' }, 405);
@@ -26,7 +40,7 @@ export async function onRequest({ request, env }) {
   const ip = getClientIp(request);
 
   if (!(await rateLimit(env, `recover:${ip}`, 5, 3600))) {
-    return json({ error: 'Слишком много попыток. Попробуй позже.' }, 429);
+    return json({ error: 'Too many attempts. Try later.' }, 429);
   }
 
   let body;
@@ -34,7 +48,7 @@ export async function onRequest({ request, env }) {
   try {
     body = await readJson(request);
   } catch {
-    return json({ error: 'Некорректный JSON' }, 400);
+    return json({ error: 'Invalid JSON' }, 400);
   }
 
   const username = cleanText(body.username, 32, false) || '';
@@ -43,7 +57,7 @@ export async function onRequest({ request, env }) {
 
   if (!username || !code || !validPassword(newPassword)) {
     return json({
-      error: 'Проверь поля: ник, код восстановления и новый пароль (12+ символов, буквы и цифры).'
+      error: 'Check the fields: username, recovery code and new password (12+ chars, letters and digits).'
     }, 400);
   }
 
@@ -55,19 +69,19 @@ export async function onRequest({ request, env }) {
       .first();
 
     if (!user || !user.recovery_hash) {
-      return json({ error: 'Неверные данные восстановления' }, 401);
+      return json({ error: 'Invalid recovery data' }, 401);
     }
 
     const codeHash = await sha256Hex(code);
 
-    if (codeHash !== user.recovery_hash) {
+    if (!safeEqual(codeHash, user.recovery_hash)) {
       await audit(env, {
         userId: user.id,
         action: 'recover_failed',
         request
       });
 
-      return json({ error: 'Неверные данные восстановления' }, 401);
+      return json({ error: 'Invalid recovery data' }, 401);
     }
 
     const salt = randomHex(16);
@@ -94,6 +108,6 @@ export async function onRequest({ request, env }) {
 
     return json({ ok: true, recoveryCode: newCode });
   } catch {
-    return json({ error: 'Внутренняя ошибка' }, 500);
+    return json({ error: 'Internal error' }, 500);
   }
 }
