@@ -3,11 +3,10 @@ import {
   readJson,
   checkOrigin,
   getSessionUser,
-  rateLimit,
-  audit
+  rateLimit
 } from '../_utils.js';
 
-export const REACTION_EMOJIS = ['👍', '🔥', '', '😂', '❤️', '🛡️'];
+export const REACTION_EMOJIS = ['👍', '', '', '', '❤️', '️'];
 
 export async function onRequest({ request, env }) {
   if (request.method !== 'POST') {
@@ -46,7 +45,7 @@ export async function onRequest({ request, env }) {
   }
 
   try {
-    const post = await env.DB.prepare('SELECT id, deleted FROM posts WHERE id = ? LIMIT 1')
+    const post = await env.DB.prepare('SELECT id, user_id, thread_id, deleted FROM posts WHERE id = ? LIMIT 1')
       .bind(postId)
       .first();
 
@@ -60,8 +59,11 @@ export async function onRequest({ request, env }) {
       .bind(postId, user.id)
       .first();
 
+    let removed = false;
+
     if (existing && existing.emoji === emoji) {
       await env.DB.prepare('DELETE FROM reactions WHERE id = ?').bind(existing.id).run();
+      removed = true;
     } else if (existing) {
       await env.DB.prepare('UPDATE reactions SET emoji = ?, created_at = ? WHERE id = ?')
         .bind(emoji, Date.now(), existing.id)
@@ -72,6 +74,18 @@ export async function onRequest({ request, env }) {
       )
         .bind(postId, user.id, emoji, Date.now())
         .run();
+    }
+
+    if (!removed && post.user_id !== user.id) {
+      try {
+        await env.DB.prepare(
+          'INSERT INTO notifications (user_id, actor_id, type, post_id, thread_id, created_at, read_at) VALUES (?, ?, ?, ?, ?, ?, NULL)'
+        )
+          .bind(post.user_id, user.id, 'reaction', postId, post.thread_id, Date.now())
+          .run();
+      } catch {
+        // ignore
+      }
     }
 
     return json({ ok: true });
