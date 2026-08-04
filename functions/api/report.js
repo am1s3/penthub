@@ -20,11 +20,11 @@ export async function onRequest({ request, env }) {
   const user = await getSessionUser(env, request);
 
   if (!user) {
-    return json({ error: 'Требуется вход' }, 401);
+    return json({ error: 'Login required' }, 401);
   }
 
   if (!(await rateLimit(env, `reports:user:${user.id}`, 20, 3600))) {
-    return json({ error: 'Слишком много жалоб за час. Попробуй позже.' }, 429);
+    return json({ error: 'Too many reports per hour. Try later.' }, 429);
   }
 
   let body;
@@ -32,18 +32,18 @@ export async function onRequest({ request, env }) {
   try {
     body = await readJson(request);
   } catch {
-    return json({ error: 'Некорректный JSON' }, 400);
+    return json({ error: 'Invalid JSON' }, 400);
   }
 
   const postId = Number.parseInt(body.postId, 10);
   const reason = cleanText(body.reason, 500, false);
 
   if (!Number.isInteger(postId)) {
-    return json({ error: 'Некорректный postId' }, 400);
+    return json({ error: 'Invalid postId' }, 400);
   }
 
   if (!reason) {
-    return json({ error: 'Укажи причину жалобы' }, 400);
+    return json({ error: 'Specify a report reason' }, 400);
   }
 
   try {
@@ -54,11 +54,11 @@ export async function onRequest({ request, env }) {
       .first();
 
     if (!post || post.deleted) {
-      return json({ error: 'Пост не найден' }, 404);
+      return json({ error: 'Post not found' }, 404);
     }
 
     if (post.user_id === user.id) {
-      return json({ error: 'Нельзя жаловаться на свой собственный пост' }, 400);
+      return json({ error: 'You cannot report your own post' }, 400);
     }
 
     const duplicate = await env.DB.prepare(
@@ -68,7 +68,7 @@ export async function onRequest({ request, env }) {
       .first();
 
     if (duplicate) {
-      return json({ error: 'Жалоба на этот пост уже на рассмотрении' }, 409);
+      return json({ error: 'A report for this post is already pending' }, 409);
     }
 
     await env.DB.prepare(
@@ -94,6 +94,6 @@ export async function onRequest({ request, env }) {
 
     return json({ ok: true }, 201);
   } catch {
-    return json({ error: 'Внутренняя ошибка' }, 500);
+    return json({ error: 'Internal error' }, 500);
   }
 }
