@@ -1,5 +1,5 @@
 import {
-  json, readJson, checkOrigin, getSessionUser, rateLimit, cleanText, containsProhibited, audit
+  json, readJson, checkOrigin, getSessionUser, rateLimit, cleanText, containsProhibited, audit, isStaff
 } from '../_utils.js';
 
 import { cleanAttachments } from './posts.js';
@@ -49,18 +49,14 @@ async function handleGet(request, env) {
          JOIN users s ON s.id = pm.sender_id
          JOIN users r ON r.id = pm.recipient_id
          WHERE (pm.sender_id = ? AND pm.recipient_id = ?) OR (pm.sender_id = ? AND pm.recipient_id = ?)
-         ORDER BY pm.created_at ASC
-         LIMIT ? OFFSET ?`
+         ORDER BY pm.created_at ASC LIMIT ? OFFSET ?`
       ).bind(user.id, other.id, other.id, user.id, PER_PAGE, offset).all();
 
       const messages = (result.results || []).map((m) => ({ ...m, attachments: parseAtt(m.attachments) }));
 
       return json({
         with: { id: other.id, username: other.username },
-        messages,
-        page,
-        perPage: PER_PAGE,
-        hasMore: messages.length === PER_PAGE
+        messages, page, perPage: PER_PAGE, hasMore: messages.length === PER_PAGE
       });
     }
 
@@ -73,8 +69,7 @@ async function handleGet(request, env) {
        JOIN users s ON s.id = pm.sender_id
        JOIN users r ON r.id = pm.recipient_id
        WHERE ${isOutbox ? 'pm.sender_id = ?' : 'pm.recipient_id = ?'}
-       ORDER BY pm.created_at DESC
-       LIMIT ? OFFSET ?`
+       ORDER BY pm.created_at DESC LIMIT ? OFFSET ?`
     ).bind(user.id, PER_PAGE, offset).all();
 
     const messages = (result.results || []).map((m) => ({ ...m, attachments: parseAtt(m.attachments) }));
@@ -103,18 +98,25 @@ async function handlePost(request, env) {
   const attachments = cleanAttachments(body.attachments);
 
   if (!toUsername || !messageBody) return json({ error: 'Recipient and message are required' }, 400);
-
-  if (containsProhibited(messageBody)) {
-    return json({ error: 'Message violates platform rules' }, 400);
-  }
+  if (containsProhibited(messageBody)) return json({ error: 'Message violates platform rules' }, 400);
 
   try {
-    const recipient = await env.DB.prepare('SELECT id, banned FROM users WHERE username = ? COLLATE NOCASE LIMIT 1')
+    const recipient = await env.DB.prepare('SELECT id, banned, pm_policy FROM users WHERE username = ? COLLATE NOCASE LIMIT 1')
       .bind(toUsername).first();
 
     if (!recipient) return json({ error: 'Recipient not found' }, 404);
     if (recipient.banned) return json({ error: 'Recipient is banned' }, 400);
     if (recipient.id === user.id) return json({ error: 'You cannot message yourself' }, 400);
+
+    const policy = recipient.pm_policy || 'all';
+
+    if (policy === 'none' && !isStaff(user)) {
+      return json({ error: 'This user does not accept messages' }, 403);
+    }
+
+    if (policy === 'staff' && !isStaff(user)) {
+      return json({ error: 'This user accepts messages from staff only' }, 403);
+    }
 
     const inserted = await env.DB.prepare(
       'INSERT INTO private_messages (sender_id, recipient_id, body, attachments, created_at, read_at) VALUES (?, ?, ?, ?, ?, NULL) RETURNING id'
