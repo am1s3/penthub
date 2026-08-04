@@ -9,17 +9,13 @@ import {
   audit
 } from '../_utils.js';
 
+import { storeMentions } from './posts.js';
+
 const THREADS_PER_PAGE = 20;
 
 export async function onRequest({ request, env }) {
-  if (request.method === 'GET') {
-    return getThreads(request, env);
-  }
-
-  if (request.method === 'POST') {
-    return createThread(request, env);
-  }
-
+  if (request.method === 'GET') return getThreads(request, env);
+  if (request.method === 'POST') return createThread(request, env);
   return json({ error: 'Method not allowed' }, 405);
 }
 
@@ -34,7 +30,7 @@ async function getThreads(request, env) {
 
   if (category) {
     if (!/^[a-z0-9-]{3,64}$/.test(category)) {
-      return json({ error: 'Некорректная категория' }, 400);
+      return json({ error: 'Invalid category' }, 400);
     }
 
     where.push('c.slug = ?');
@@ -73,14 +69,9 @@ async function getThreads(request, env) {
 
     const threads = result.results || [];
 
-    return json({
-      threads,
-      page,
-      perPage: THREADS_PER_PAGE,
-      hasMore: threads.length === THREADS_PER_PAGE
-    });
+    return json({ threads, page, perPage: THREADS_PER_PAGE, hasMore: threads.length === THREADS_PER_PAGE });
   } catch {
-    return json({ error: 'Внутренняя ошибка' }, 500);
+    return json({ error: 'Internal error' }, 500);
   }
 }
 
@@ -91,12 +82,10 @@ async function createThread(request, env) {
 
   const user = await getSessionUser(env, request);
 
-  if (!user) {
-    return json({ error: 'Требуется вход' }, 401);
-  }
+  if (!user) return json({ error: 'Login required' }, 401);
 
   if (!(await rateLimit(env, `threads:user:${user.id}`, 10, 3600))) {
-    return json({ error: 'Слишком много тредов за час. Попробуй позже.' }, 429);
+    return json({ error: 'Too many threads per hour. Try later.' }, 429);
   }
 
   let body;
@@ -104,7 +93,7 @@ async function createThread(request, env) {
   try {
     body = await readJson(request);
   } catch {
-    return json({ error: 'Некорректный JSON' }, 400);
+    return json({ error: 'Invalid JSON' }, 400);
   }
 
   const categoryId = Number.parseInt(body.categoryId, 10);
@@ -112,21 +101,19 @@ async function createThread(request, env) {
   const firstPostBody = cleanText(body.body, 10000, true);
 
   if (!Number.isInteger(categoryId)) {
-    return json({ error: 'Некорректная категория' }, 400);
+    return json({ error: 'Invalid category' }, 400);
   }
 
   if (!title || title.length < 4) {
-    return json({ error: 'Заголовок должен быть от 4 до 160 символов' }, 400);
+    return json({ error: 'Title must be 4-160 characters' }, 400);
   }
 
   if (!firstPostBody) {
-    return json({ error: 'Текст первого поста должен быть от 1 до 10000 символов' }, 400);
+    return json({ error: 'First post must be 1-10000 characters' }, 400);
   }
 
   if (containsProhibited(`${title}\n${firstPostBody}`)) {
-    return json({
-      error: 'Тема содержит запрещённое направление. Только легальные исследования, lab, CTF и authorized pentest.'
-    }, 400);
+    return json({ error: 'Thread violates platform rules. Legal research, labs, CTF and authorized pentest only.' }, 400);
   }
 
   try {
@@ -135,23 +122,15 @@ async function createThread(request, env) {
       .first();
 
     if (!category) {
-      return json({ error: 'Категория не найдена' }, 404);
+      return json({ error: 'Category not found' }, 404);
     }
 
     const now = Date.now();
 
     const thread = await env.DB.prepare(
       `
-        INSERT INTO threads (
-          category_id,
-          user_id,
-          title,
-          created_at,
-          updated_at,
-          is_locked,
-          is_pinned,
-          deleted
-        ) VALUES (?, ?, ?, ?, ?, 0, 0, 0)
+        INSERT INTO threads (category_id, user_id, title, created_at, updated_at, is_locked, is_pinned, deleted)
+        VALUES (?, ?, ?, ?, ?, 0, 0, 0)
         RETURNING id
       `
     )
@@ -159,24 +138,17 @@ async function createThread(request, env) {
       .first();
 
     if (!thread) {
-      return json({ error: 'Не удалось создать тред' }, 500);
+      return json({ error: 'Failed to create thread' }, 500);
     }
 
     try {
-      await env.DB.prepare(
-        `
-          INSERT INTO posts (
-            thread_id,
-            user_id,
-            body,
-            created_at,
-            updated_at,
-            deleted
-          ) VALUES (?, ?, ?, ?, ?, 0)
-        `
+      const firstPost = await env.DB.prepare(
+        'INSERT INTO posts (thread_id, user_id, body, created_at, updated_at, deleted) VALUES (?, ?, ?, ?, ?, 0) RETURNING id'
       )
         .bind(thread.id, user.id, firstPostBody, now, now)
-        .run();
+        .first();
+
+      await storeMentions(env, firstPost?.id ?? thread.id, firstPostBody, user.id);
     } catch (postError) {
       await env.DB.prepare('UPDATE threads SET deleted = 1 WHERE id = ?')
         .bind(thread.id)
@@ -185,15 +157,10 @@ async function createThread(request, env) {
       throw postError;
     }
 
-    await audit(env, {
-      userId: user.id,
-      action: 'create_thread',
-      request,
-      details: `${thread.id}:${title}`
-    });
+    await audit(env, { userId: user.id, action: 'create_thread', request, details: `${thread.id}:${title}` });
 
     return json({ id: thread.id }, 201);
   } catch {
-    return json({ error: 'Внутренняя ошибка' }, 500);
+    return json({ error: 'Internal error' }, 500);
   }
 }
