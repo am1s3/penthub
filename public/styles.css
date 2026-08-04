@@ -366,6 +366,62 @@ textarea {
   overflow-wrap: anywhere;
 }
 
+.post-body h3,
+.post-body h4,
+.post-body h5 {
+  margin: 12px 0 6px;
+}
+
+.post-body ul,
+.post-body ol {
+  margin: 6px 0;
+  padding-left: 22px;
+}
+
+.post-body blockquote {
+  border-left: 3px solid var(--accent);
+  margin: 8px 0;
+  padding: 6px 12px;
+  background: rgba(34, 211, 165, 0.06);
+  color: var(--muted);
+  border-radius: 0 8px 8px 0;
+}
+
+code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+  background: #0a1017;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 6px;
+  color: #7ee7c8;
+}
+
+.code-block {
+  background: #0a1017;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+
+.code-block code {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--text);
+}
+
+.edited {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.edit-area {
+  min-height: 120px;
+}
+
 .post footer {
   margin-top: 12px;
   display: flex;
