@@ -45,6 +45,27 @@ export async function storeMentions(env, postId, text, authorId) {
     await env.DB.prepare('INSERT OR IGNORE INTO mentions (post_id, user_id, created_at) VALUES (?, ?, ?)')
       .bind(postId, u.id, now)
       .run();
+
+    await env.DB.prepare(
+      'INSERT INTO notifications (user_id, actor_id, type, post_id, thread_id, created_at, read_at) VALUES (?, ?, ?, ?, ?, ?, NULL)'
+    )
+      .bind(u.id, authorId, 'mention', postId, null, now)
+      .run()
+      .catch(() => {});
+  }
+}
+
+async function notify(env, { userId, actorId, type, postId, threadId }) {
+  if (!userId || userId === actorId) return;
+
+  try {
+    await env.DB.prepare(
+      'INSERT INTO notifications (user_id, actor_id, type, post_id, thread_id, created_at, read_at) VALUES (?, ?, ?, ?, ?, ?, NULL)'
+    )
+      .bind(userId, actorId, type, postId, threadId, Date.now())
+      .run();
+  } catch {
+    // notifications must not break the main flow
   }
 }
 
@@ -182,7 +203,7 @@ async function createPost(request, env) {
   }
 
   try {
-    const thread = await env.DB.prepare('SELECT id, is_locked, deleted FROM threads WHERE id = ? LIMIT 1')
+    const thread = await env.DB.prepare('SELECT id, user_id, is_locked, deleted FROM threads WHERE id = ? LIMIT 1')
       .bind(threadId)
       .first();
 
@@ -215,6 +236,14 @@ async function createPost(request, env) {
       .run();
 
     await storeMentions(env, inserted.id, postBody, user.id);
+
+    await notify(env, {
+      userId: thread.user_id,
+      actorId: user.id,
+      type: 'reply',
+      postId: inserted.id,
+      threadId
+    });
 
     await audit(env, { userId: user.id, action: 'create_post', request, details: `${threadId}:${inserted.id}` });
 
