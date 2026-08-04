@@ -2,15 +2,23 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>PentHub — legal pentesting & hardware security forum</title>
   <meta name="description" content="PentHub — a forum for legal pentesters, CTF players, ESP32, Flipper Zero, defensive security and hardware security labs." />
+  <meta name="theme-color" content="#0d1117" />
+  <meta property="og:title" content="PentHub" />
+  <meta property="og:description" content="Legal pentesting & hardware security forum." />
+  <meta property="og:type" content="website" />
   <link rel="stylesheet" href="/styles.css" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>" />
+  <link rel="icon" href="/logo.svg" type="image/svg+xml" />
+  <link rel="alternate" type="application/rss+xml" title="PentHub RSS" href="/api/rss" />
 </head>
 <body>
   <header class="topbar">
-    <a class="logo" href="#/">Pent<span>Hub</span></a>
+    <a class="logo" href="#/">
+      <img src="/logo.svg" alt="" class="logo-mark" />
+      <span>Pent<strong>Hub</strong></span>
+    </a>
 
     <form id="search-form" autocomplete="off">
       <input id="search-input" type="search" placeholder="Search PentHub" minlength="3" maxlength="64" />
@@ -19,10 +27,13 @@
     <nav id="top-actions" class="top-actions" aria-label="Quick actions"></nav>
   </header>
 
+  <div id="ban-bar" class="ban-bar hidden"></div>
+  <div id="whatsnew-bar" class="whatsnew-bar hidden"></div>
+
   <div class="shell">
     <aside id="sidebar" class="sidebar" aria-label="Navigation"></aside>
     <main id="app" aria-live="polite"></main>
-    <aside id="rightbar" class="rightbar" aria-label="Categories"></aside>
+    <aside id="rightbar" class="rightbar" aria-label="Sidebar"></aside>
   </div>
 
   <footer class="footer">
@@ -30,10 +41,19 @@
       <p>
         PentHub is a platform for legal research, education and defensive security.
         Any actions outside the law or without written permission are prohibited.
-        <a href="/api/rss">RSS</a> · <a href="#/rules">Rules</a>
+      </p>
+      <p class="footer-links">
+        <a href="#/terms">Terms</a> ·
+        <a href="#/privacy">Privacy</a> ·
+        <a href="#/rules">Rules</a> ·
+        <a href="#/changelog">What's new</a> ·
+        <a href="#/firmware/bruce/wiki">Bruce wiki</a> ·
+        <a href="/api/rss">RSS</a>
       </p>
     </div>
   </footer>
+
+  <div id="share-menu" class="share-menu hidden" role="dialog" aria-modal="true"></div>
 
   <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Report">
     <div class="modal-card">
@@ -50,10 +70,7 @@
   <div id="recovery-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Recovery code">
     <div class="modal-card">
       <h3>Recovery code</h3>
-      <p class="muted">
-        Store it in a safe place (password manager, vault). This is the ONLY way to recover
-        access without email. Shown once.
-      </p>
+      <p class="muted">Store it in a safe place (password manager, vault). This is the ONLY way to recover access without email. Shown once.</p>
       <pre class="notice" id="recovery-code"></pre>
       <div class="modal-actions">
         <button id="recovery-copy" class="btn ghost" type="button">Copy</button>
