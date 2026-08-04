@@ -7,9 +7,16 @@ const POSTS_PER_PAGE = 20;
 
 export function cleanAttachments(list) {
   if (!Array.isArray(list)) return [];
-  return list
-    .filter((u) => typeof u === 'string' && u.startsWith('/api/files/'))
-    .slice(0, 4);
+  return list.filter((u) => typeof u === 'string' && u.startsWith('/api/files/')).slice(0, 4);
+}
+
+function safeParseAttachments(raw) {
+  try {
+    const list = JSON.parse(raw || '[]');
+    return Array.isArray(list) ? list.filter((u) => typeof u === 'string' && u.startsWith('/api/files/')).slice(0, 4) : [];
+  } catch {
+    return [];
+  }
 }
 
 export function extractMentions(text) {
@@ -21,7 +28,7 @@ export function extractMentions(text) {
   return [...set];
 }
 
-export async function storeMentions(env, postId, text, authorId) {
+export async function storeMentions(env, postId, text, authorId, threadId = null) {
   const names = extractMentions(text);
   if (!names.length) return;
 
@@ -35,15 +42,19 @@ export async function storeMentions(env, postId, text, authorId) {
     await env.DB.prepare('INSERT OR IGNORE INTO mentions (post_id, user_id, created_at) VALUES (?, ?, ?)')
       .bind(postId, u.id, now).run();
 
-    await env.DB.prepare(
-      'INSERT INTO notifications (user_id, actor_id, type, post_id, thread_id, created_at, read_at) VALUES (?, ?, ?, ?, ?, ?, NULL)'
-    ).bind(u.id, authorId, 'mention', postId, null, now).run().catch(() => {});
+    await notify(env, { userId: u.id, actorId: authorId, type: 'mention', postId, threadId });
   }
 }
 
 async function notify(env, { userId, actorId, type, postId, threadId }) {
   if (!userId || userId === actorId) return;
+
   try {
+    const col = type === 'reply' ? 'notify_reply' : type === 'mention' ? 'notify_mention' : 'notify_reaction';
+    const row = await env.DB.prepare(`SELECT ${col} AS flag FROM users WHERE id = ?`).bind(userId).first();
+
+    if (row && row.flag === 0) return;
+
     await env.DB.prepare(
       'INSERT INTO notifications (user_id, actor_id, type, post_id, thread_id, created_at, read_at) VALUES (?, ?, ?, ?, ?, ?, NULL)'
     ).bind(userId, actorId, type, postId, threadId, Date.now()).run();
@@ -76,18 +87,14 @@ async function getPosts(request, env) {
     const viewer = await getSessionUser(env, request);
 
     const result = await env.DB.prepare(
-      `SELECT
-         p.id, p.thread_id, p.user_id, p.body, p.attachments, p.created_at, p.updated_at,
-         u.username, u.is_admin
-       FROM posts p
-       JOIN users u ON u.id = p.user_id
+      `SELECT p.id, p.thread_id, p.user_id, p.body, p.attachments, p.created_at, p.updated_at,
+              u.username, u.is_admin
+       FROM posts p JOIN users u ON u.id = p.user_id
        WHERE p.thread_id = ? AND p.deleted = 0
-       ORDER BY p.created_at ASC
-       LIMIT ? OFFSET ?`
+       ORDER BY p.created_at ASC LIMIT ? OFFSET ?`
     ).bind(threadId, POSTS_PER_PAGE, offset).all();
 
     let posts = result.results || [];
-
     const meta = await getUserMetaMap(env, posts.map((p) => p.user_id));
 
     posts = posts.map((p) => ({
@@ -129,21 +136,10 @@ async function getPosts(request, env) {
         reactions: reactionsMap[post.id] || [],
         my_reaction: myMap[post.id] || null
       })),
-      page,
-      perPage: POSTS_PER_PAGE,
-      hasMore: posts.length === POSTS_PER_PAGE
+      page, perPage: POSTS_PER_PAGE, hasMore: posts.length === POSTS_PER_PAGE
     });
   } catch {
     return json({ error: 'Internal error' }, 500);
-  }
-}
-
-function safeParseAttachments(raw) {
-  try {
-    const list = JSON.parse(raw || '[]');
-    return Array.isArray(list) ? list.filter((u) => typeof u === 'string' && u.startsWith('/api/files/')).slice(0, 4) : [];
-  } catch {
-    return [];
   }
 }
 
@@ -189,7 +185,7 @@ async function createPost(request, env) {
 
     await env.DB.prepare('UPDATE threads SET updated_at = ? WHERE id = ?').bind(now, threadId).run();
 
-    await storeMentions(env, inserted.id, postBody, user.id);
+    await storeMentions(env, inserted.id, postBody, user.id, threadId);
     await notify(env, { userId: thread.user_id, actorId: user.id, type: 'reply', postId: inserted.id, threadId });
     await audit(env, { userId: user.id, action: 'create_post', request, details: `${threadId}:${inserted.id}` });
 
