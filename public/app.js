@@ -3358,3 +3358,764 @@ async function render() {
 
   updateTopbar();
 }
+// === PART 4: attachments + no native dialogs ===
+
+const attachStore = {};
+
+function attachmentsHtml(list) {
+  if (!list || !list.length) return '';
+  return `
+    <div class="attach-grid">
+      ${list.map((u) => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="attachment"></a>`).join('')}
+    </div>
+  `;
+}
+
+function attachPickerHtml(pid) {
+  return `
+    <div class="admin-controls">
+      <label class="btn ghost small" style="cursor:pointer">
+        📎 Attach image
+        <input type="file" accept="image/png,image/jpeg,image/webp,image/gif" data-attach-input="${pid}" hidden />
+      </label>
+    </div>
+    <div class="attach-grid" id="attach-preview-${pid}"></div>
+  `;
+}
+
+function renderAttachPreview(pid) {
+  const box = document.getElementById(`attach-preview-${pid}`);
+  if (!box) return;
+
+  box.innerHTML = (attachStore[pid] || []).map((u, i) => `
+    <span class="attach-item">
+      <img src="${esc(u)}" alt="">
+      <button type="button" class="attach-remove" data-attach-remove="${pid}:${i}">✕</button>
+    </span>
+  `).join('');
+
+  box.querySelectorAll('[data-attach-remove]').forEach((b) => {
+    b.addEventListener('click', () => {
+      const [p, idx] = b.dataset.attachRemove.split(':');
+      (attachStore[p] || []).splice(Number(idx), 1);
+      renderAttachPreview(p);
+    });
+  });
+}
+
+function bindAttachPicker(pid) {
+  attachStore[pid] = attachStore[pid] || [];
+  const input = document.querySelector(`[data-attach-input="${pid}"]`);
+  if (!input) return;
+
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    if (!file) return;
+
+    if ((attachStore[pid] || []).length >= 4) {
+      toast('Max 4 images per message', true);
+      input.value = '';
+      return;
+    }
+
+    try {
+      const dataUrl = await fileToDataURL(file, 1500000);
+      const res = await api('/api/upload', { method: 'POST', body: JSON.stringify({ dataUrl }) });
+      attachStore[pid].push(res.url);
+      renderAttachPreview(pid);
+      toast('Image attached');
+    } catch (e) {
+      toast(e.message, true);
+    }
+
+    input.value = '';
+  });
+
+  renderAttachPreview(pid);
+}
+
+// postHtml override: render attachments
+function postHtml(post) {
+  const edited = post.updated_at > post.created_at ? '<span class="edited">(edited)</span>' : '';
+
+  return `
+    <article class="post" id="post-${post.id}">
+      ${avatarHtml(post.username, '', post.avatar || '')}
+      <div class="post-main">
+        <div class="feed-head">
+          <span class="feed-name">${userLink(post)}</span>
+          ${badgesHtml(post.badges, post)}
+          <span class="muted">· ${time(post.created_at)} ${edited}</span>
+        </div>
+        <div class="post-body">${mdToHtml(post.body)}</div>
+        ${attachmentsHtml(post.attachments)}
+        ${state.me ? reactionsHtml(post) : ''}
+        ${actionBarHtml(post)}
+      </div>
+    </article>
+  `;
+}
+
+// thread override: reply form with attachments
+function renderThread(id, query) {
+  return async function threadView() {
+    const threadId = Number(id);
+    if (!Number.isInteger(threadId)) throw new Error('Invalid thread');
+
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+
+    const [{ thread }, postsData] = await Promise.all([
+      api(`/api/thread?id=${threadId}`),
+      api(`/api/posts?threadId=${threadId}&page=${page}`)
+    ]);
+
+    const posts = postsData.posts || [];
+    const base = `#/thread/${threadId}`;
+
+    const replyInner = (!state.me)
+      ? `<p class="notice"><a href="#/login">Log in</a> to reply.</p>`
+      : (thread.is_locked && !isStaff())
+        ? `<p class="notice warn">Thread is locked.</p>`
+        : `
+          <form id="reply-form" class="form">
+            <label>Reply <textarea id="reply-body" maxlength="10000" required minlength="1"></textarea></label>
+            <div id="reply-attach-slot">${attachPickerHtml('reply')}</div>
+            <p class="muted">Markdown: **bold**, *italic*, \`code\`, \`\`\`blocks\`\`\`, lists, &gt; quotes, [link](https://...), @mentions</p>
+            <button class="btn" type="submit">Reply</button>
+            <div id="reply-error" class="form-error"></div>
+          </form>
+        `;
+
+    app.innerHTML = `
+      <section class="page-head">
+        <div>
+          <h1>${esc(thread.title)}</h1>
+          <div class="feed-tags">
+            <a class="chip" href="#/category/${encodeURIComponent(thread.category_slug)}">${esc(thread.category_name)}</a>
+            ${(thread.tags || []).map((tag) => `<a class="chip tag" href="#/tag/${encodeURIComponent(tag)}">#${esc(tag)}</a>`).join('')}
+            <span class="muted">by ${userLink(thread)} · ${time(thread.created_at)}</span>
+          </div>
+        </div>
+        <div class="top-actions">
+          ${shareButtonHtml(`${location.origin}/#/thread/${threadId}`, thread.title)}
+          ${threadAdminHtml(thread)}
+        </div>
+      </section>
+
+      <section>${posts.map(postHtml).join('')}</section>
+
+      ${paginationHtml(base, page, Boolean(postsData.hasMore))}
+
+      <section class="card">
+        <h2>Reply</h2>
+        ${replyInner}
+      </section>
+    `;
+
+    bindAttachPicker('reply');
+    bindThreadPage(thread, posts);
+    attachShareHandlers(app);
+
+    const replyForm = document.getElementById('reply-form');
+
+    if (replyForm) {
+      replyForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const errorEl = document.getElementById('reply-error');
+
+        try {
+          await api('/api/posts', {
+            method: 'POST',
+            body: JSON.stringify({
+              threadId: thread.id,
+              body: document.getElementById('reply-body').value,
+              attachments: attachStore['reply'] || []
+            })
+          });
+          attachStore['reply'] = [];
+          toast('Reply published');
+          await render();
+        } catch (error) {
+          errorEl.textContent = error.message;
+        }
+      });
+    }
+  };
+}
+
+// new thread with attachments
+function renderNewThread(query) {
+  return async function newThreadView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const categories = await ensureCategories();
+    const selectedCategory = query.get('category') || '';
+
+    app.innerHTML = `
+      <section class="card narrow">
+        <h1>New thread</h1>
+        <p class="muted">Legal research, education, CTF, defensive security or authorized pentesting only.</p>
+        <form id="new-thread-form" class="form">
+          <label>
+            Category
+            <select id="thread-category" required>
+              <option value="">Pick a category</option>
+              ${categories.map((c) => `<option value="${c.id}" ${c.slug === selectedCategory ? 'selected' : ''}>${esc(c.section)} · ${esc(c.name)}</option>`).join('')}
+            </select>
+          </label>
+          <label>Title <input id="thread-title" class="input" required minlength="4" maxlength="160" /></label>
+          <label>Tags (comma separated, max 5) <input id="thread-tags" class="input" maxlength="120" placeholder="esp32, lab, wifi-audit" /></label>
+          <label>First post <textarea id="thread-body" required minlength="1" maxlength="10000"></textarea></label>
+          ${attachPickerHtml('newthread')}
+          <button class="btn" type="submit">Publish</button>
+          <div id="form-error" class="form-error"></div>
+        </form>
+      </section>
+    `;
+
+    bindAttachPicker('newthread');
+
+    document.getElementById('new-thread-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const errorEl = document.getElementById('form-error');
+
+      try {
+        const data = await api('/api/threads', {
+          method: 'POST',
+          body: JSON.stringify({
+            categoryId: Number(document.getElementById('thread-category').value),
+            title: document.getElementById('thread-title').value.trim(),
+            body: document.getElementById('thread-body').value,
+            tags: document.getElementById('thread-tags').value
+          })
+        });
+
+        const firstPostId = data.id;
+
+        if ((attachStore['newthread'] || []).length) {
+          // attach images to the first post via edit (keeps threads.js simple)
+          await api('/api/posts', {
+            method: 'PATCH',
+            body: JSON.stringify({
+              postId: await getFirstPostId(firstPostId),
+              body: document.getElementById('thread-body').value,
+              attachments: attachStore['newthread']
+            })
+          }).catch(() => {});
+        }
+
+        attachStore['newthread'] = [];
+        toast('Thread created');
+        location.hash = `#/thread/${data.id}`;
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    });
+  };
+}
+
+async function getFirstPostId(threadId) {
+  const data = await api(`/api/posts?threadId=${threadId}&page=1`);
+  return (data.posts || [])[0]?.id;
+}
+
+// PM new + conversation with attachments
+function renderNewMessage(query) {
+  return function newMessageView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const to = query.get('to') || '';
+
+    app.innerHTML = `
+      <section class="card narrow">
+        <h1>New message</h1>
+        <form id="pm-new-form" class="form">
+          <label>To <input id="pm-to" class="input" required minlength="3" maxlength="32" value="${esc(to)}" /></label>
+          <label>Message <textarea id="pm-body" maxlength="5000" required minlength="1"></textarea></label>
+          ${attachPickerHtml('pm-new')}
+          <button class="btn" type="submit">Send</button>
+          <div id="pm-error" class="form-error"></div>
+        </form>
+      </section>
+    `;
+
+    bindAttachPicker('pm-new');
+
+    document.getElementById('pm-new-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const errorEl = document.getElementById('pm-error');
+
+      try {
+        await api('/api/messages', {
+          method: 'POST',
+          body: JSON.stringify({
+            toUsername: document.getElementById('pm-to').value.trim(),
+            body: document.getElementById('pm-body').value,
+            attachments: attachStore['pm-new'] || []
+          })
+        });
+        attachStore['pm-new'] = [];
+        toast('Sent');
+        location.hash = `#/messages/user/${encodeURIComponent(document.getElementById('pm-to').value.trim())}`;
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    });
+  };
+}
+
+function renderConversation(username, query) {
+  return async function conversationView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+    const data = await api(`/api/messages?with=${encodeURIComponent(username)}&page=${page}`);
+    const messages = data.messages || [];
+
+    loadMe().then(() => { updateTopbar(); updateSidebar(); });
+
+    app.innerHTML = `
+      <section class="page-head">
+        <h1>Chat with ${userLink(data.with.username)}</h1>
+        <a class="btn ghost small" href="#/messages">Inbox</a>
+      </section>
+
+      ${messages.map((m) => postHtml({ ...m, username: m.sender_username, is_admin: false, badges: [], reactions: [] })).join('') || '<section class="empty">No messages yet.</section>'}
+
+      ${paginationHtml(`#/messages/user/${encodeURIComponent(username)}`, page, Boolean(data.hasMore))}
+
+      <form id="pm-reply-form" class="form">
+        <label>Message <textarea id="pm-reply-body" maxlength="5000" required minlength="1"></textarea></label>
+        ${attachPickerHtml('pm-reply')}
+        <button class="btn" type="submit">Send</button>
+        <div id="pm-reply-error" class="form-error"></div>
+      </form>
+    `;
+
+    bindAttachPicker('pm-reply');
+
+    document.getElementById('pm-reply-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const errorEl = document.getElementById('pm-reply-error');
+
+      try {
+        await api('/api/messages', {
+          method: 'POST',
+          body: JSON.stringify({
+            toUsername: username,
+            body: document.getElementById('pm-reply-body').value,
+            attachments: attachStore['pm-reply'] || []
+          })
+        });
+        attachStore['pm-reply'] = [];
+        toast('Sent');
+        await render();
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    });
+  };
+}
+
+// Support: proper modal instead of prompt()
+function renderSupport(query) {
+  return async function supportView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+    const data = await api(`/api/tickets?page=${page}`);
+    const tickets = data.tickets || [];
+
+    app.innerHTML = `
+      <section class="page-head">
+        <h1>Support</h1>
+        <button class="btn small" id="support-new">+ New ticket</button>
+      </section>
+
+      <p class="muted">Use tickets for account issues, bug reports or questions to the team. For public discussions, post in a category.</p>
+
+      ${tickets.length ? tickets.map((t) => `
+        <a class="feed-row" href="#/ticket/${Number(t.id)}">
+          <span class="notif-icon">${t.status === 'open' ? '?' : '✓'}</span>
+          <div class="feed-main">
+            <div class="feed-head">
+              <span class="chip ${t.status === 'open' ? 'warn' : 'green'}">${esc(t.status)}</span>
+              <span class="feed-name">${esc(t.subject)}</span>
+              ${t.username ? `<span class="muted">· @${esc(t.username)}</span>` : ''}
+            </div>
+            <div class="muted">Updated ${time(t.updated_at)}</div>
+          </div>
+        </a>
+      `).join('') : '<section class="empty">No tickets yet.</section>'}
+
+      ${paginationHtml('#/support', page, Boolean(data.hasMore))}
+    `;
+
+    document.getElementById('support-new').addEventListener('click', () => {
+      openTicketModal();
+    });
+  };
+}
+
+function openTicketModal() {
+  const m = document.getElementById('ticket-modal');
+  document.getElementById('ticket-subject').value = '';
+  document.getElementById('ticket-body').value = '';
+  document.getElementById('ticket-modal-error').textContent = '';
+  document.getElementById('ticket-attach-slot').innerHTML = attachPickerHtml('ticket');
+  bindAttachPicker('ticket');
+  m.classList.remove('hidden');
+}
+
+document.getElementById('ticket-modal-cancel').addEventListener('click', () => {
+  document.getElementById('ticket-modal').classList.add('hidden');
+});
+
+document.getElementById('ticket-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'ticket-modal') e.target.classList.add('hidden');
+});
+
+document.getElementById('ticket-modal-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const errorEl = document.getElementById('ticket-modal-error');
+
+  try {
+    const res = await api('/api/tickets', {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'create',
+        subject: document.getElementById('ticket-subject').value,
+        body: document.getElementById('ticket-body').value,
+        attachments: attachStore['ticket'] || []
+      })
+    });
+
+    attachStore['ticket'] = [];
+    document.getElementById('ticket-modal').classList.add('hidden');
+    toast('Ticket created');
+    location.hash = `#/ticket/${res.id}`;
+  } catch (error) {
+    errorEl.textContent = error.message;
+  }
+});
+
+// Ticket view with attachments in replies
+function renderTicket(ticketId) {
+  return async function ticketView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const data = await api(`/api/tickets?id=${ticketId}`);
+    const { ticket, messages } = data;
+
+    app.innerHTML = `
+      <section class="page-head">
+        <div>
+          <h1>${esc(ticket.subject)}</h1>
+          <div class="feed-tags">
+            <span class="chip ${ticket.status === 'open' ? 'warn' : 'green'}">${esc(ticket.status)}</span>
+            <span class="muted">Opened ${time(ticket.created_at)} · Updated ${time(ticket.updated_at)}</span>
+          </div>
+        </div>
+        <a class="btn ghost small" href="#/support">Back</a>
+      </section>
+
+      <section>
+        ${messages.map((m) => `
+          <article class="post">
+            ${avatarHtml(m.username, '')}
+            <div class="post-main">
+              <div class="feed-head">
+                <span class="feed-name">${userLink(m.username)}</span>
+                ${m.is_staff ? '<span class="chip green">staff</span>' : ''}
+                <span class="muted">· ${time(m.created_at)}</span>
+              </div>
+              <div class="post-body">${mdToHtml(m.body)}</div>
+              ${attachmentsHtml(m.attachments)}
+            </div>
+          </article>
+        `).join('')}
+      </section>
+
+      ${ticket.status === 'closed' && !isStaff() ? '<p class="notice">This ticket is closed.</p>' : `
+        <form id="ticket-reply" class="form">
+          <label>Reply <textarea id="ticket-reply-body" maxlength="5000" required minlength="1"></textarea></label>
+          ${attachPickerHtml('ticket-reply')}
+          <div class="admin-controls">
+            <button class="btn" type="submit">Send</button>
+            ${isStaff() ? `<button class="btn ghost" type="button" data-ticket-close="${ticket.id}">${ticket.status === 'closed' ? 'Reopen' : 'Close ticket'}</button>` : ''}
+          </div>
+          <div id="ticket-error" class="form-error"></div>
+        </form>
+      `}
+    `;
+
+    bindAttachPicker('ticket-reply');
+
+    const replyForm = document.getElementById('ticket-reply');
+
+    if (replyForm) {
+      replyForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const errorEl = document.getElementById('ticket-error');
+
+        try {
+          await api('/api/tickets', {
+            method: 'POST',
+            body: JSON.stringify({
+              action: 'reply',
+              ticketId,
+              body: document.getElementById('ticket-reply-body').value,
+              attachments: attachStore['ticket-reply'] || []
+            })
+          });
+          attachStore['ticket-reply'] = [];
+          toast('Reply sent');
+          await render();
+        } catch (error) {
+          errorEl.textContent = error.message;
+        }
+      });
+    }
+
+    const closeBtn = document.querySelector('[data-ticket-close]');
+
+    if (closeBtn) {
+      closeBtn.addEventListener('click', async () => {
+        try {
+          await api('/api/tickets', {
+            method: 'POST',
+            body: JSON.stringify({ action: ticket.status === 'closed' ? 'reopen' : 'close', ticketId })
+          });
+          toast('Ticket updated');
+          await render();
+        } catch (error) {
+          toast(error.message, true);
+        }
+      });
+    }
+  };
+}
+
+// Changelog: modal instead of prompt()
+function renderChangelog(query) {
+  return async function changelogView() {
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+    const data = await api(`/api/changelog?page=${page}`);
+    const items = data.items || [];
+
+    if (data.latest_id) {
+      state.changelogSeenId = data.latest_id;
+      localStorage.setItem('penthub_changelog_seen', String(data.latest_id));
+      whatsnewBar.classList.add('hidden');
+    }
+
+    app.innerHTML = `
+      <section class="page-head">
+        <h1>What's new</h1>
+        ${state.me?.isAdmin ? '<button class="btn small" id="changelog-new">+ New release</button>' : ''}
+      </section>
+
+      ${items.map((c) => `
+        <article class="card">
+          <div class="feed-head">
+            <span class="chip green">${esc(c.version)}</span>
+            <span class="feed-name">${esc(c.title)}</span>
+            <span class="muted">· ${time(c.created_at)}</span>
+          </div>
+          <div class="post-body">${mdToHtml(c.body)}</div>
+        </article>
+      `).join('') || '<section class="empty">No changelog yet.</section>'}
+
+      ${paginationHtml('#/changelog', page, Boolean(data.hasMore))}
+    `;
+
+    document.getElementById('changelog-new')?.addEventListener('click', () => {
+      document.getElementById('cl-version').value = '';
+      document.getElementById('cl-title').value = '';
+      document.getElementById('cl-body').value = '';
+      document.getElementById('changelog-modal-error').textContent = '';
+      document.getElementById('changelog-modal').classList.remove('hidden');
+    });
+  };
+}
+
+document.getElementById('changelog-modal-cancel').addEventListener('click', () => {
+  document.getElementById('changelog-modal').classList.add('hidden');
+});
+
+document.getElementById('changelog-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'changelog-modal') e.target.classList.add('hidden');
+});
+
+document.getElementById('changelog-modal-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const errorEl = document.getElementById('changelog-modal-error');
+
+  try {
+    await api('/api/changelog', {
+      method: 'POST',
+      body: JSON.stringify({
+        version: document.getElementById('cl-version').value,
+        title: document.getElementById('cl-title').value,
+        body: document.getElementById('cl-body').value
+      })
+    });
+    document.getElementById('changelog-modal').classList.add('hidden');
+    toast('Published');
+    await render();
+  } catch (error) {
+    errorEl.textContent = error.message;
+  }
+});
+
+// Admin override: ban via modal, badge delete via two-step confirm (no confirm())
+function bindAdminPage() {
+  document.querySelectorAll('[data-admin-report]').forEach((button) => {
+    button.addEventListener('click', () => adminAction('report', Number(button.dataset.adminReport), button.dataset.adminAction));
+  });
+
+  document.querySelectorAll('[data-admin-user]').forEach((button) => {
+    button.addEventListener('click', () => adminAction('user', Number(button.dataset.adminUser), button.dataset.adminAction));
+  });
+
+  document.querySelectorAll('[data-admin-user-ban]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const userId = Number(button.dataset.adminUserBan);
+      const banModal = document.getElementById('ban-modal');
+      document.getElementById('ban-reason').value = '';
+      banModal.classList.remove('hidden');
+
+      const form = document.getElementById('ban-modal-form');
+      const newForm = form.cloneNode(true);
+      form.parentNode.replaceChild(newForm, form);
+
+      newForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const reason = document.getElementById('ban-reason').value.trim();
+        if (!reason) return;
+        banModal.classList.add('hidden');
+        adminAction('user', userId, 'ban', { reason });
+      });
+    });
+  });
+
+  document.getElementById('ban-modal-cancel').addEventListener('click', () => {
+    document.getElementById('ban-modal').classList.add('hidden');
+  });
+
+  document.getElementById('ban-modal').addEventListener('click', (e) => {
+    if (e.target.id === 'ban-modal') e.target.classList.add('hidden');
+  });
+
+  document.querySelectorAll('[data-appeal-approve]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        await api('/api/appeals', { method: 'POST', body: JSON.stringify({ action: 'approve', id: Number(button.dataset.appealApprove) }) });
+        toast('Appeal approved, user unbanned');
+        await render();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-appeal-reject]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        await api('/api/appeals', { method: 'POST', body: JSON.stringify({ action: 'reject', id: Number(button.dataset.appealReject) }) });
+        toast('Appeal rejected');
+        await render();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-badge-delete]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (!button.dataset.armed) {
+        button.dataset.armed = '1';
+        button.classList.add('confirm-arm');
+        button.textContent = 'Click again to confirm';
+        setTimeout(() => {
+          delete button.dataset.armed;
+          button.classList.remove('confirm-arm');
+          button.textContent = 'Delete badge';
+        }, 3000);
+        return;
+      }
+
+      try {
+        await api('/api/badges', { method: 'POST', body: JSON.stringify({ action: 'delete', id: Number(button.dataset.badgeDelete) }) });
+        toast('Badge deleted');
+        await render();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  });
+
+  const searchForm = document.getElementById('admin-user-search');
+
+  if (searchForm) {
+    searchForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const q = document.getElementById('admin-user-q').value.trim();
+      location.hash = `#/admin?tab=users&q=${encodeURIComponent(q)}`;
+    });
+  }
+
+  document.getElementById('export-btn')?.addEventListener('click', exportBackup);
+
+  const badgeCreate = document.getElementById('badge-create');
+
+  if (badgeCreate) {
+    badgeCreate.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try {
+        await api('/api/badges', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'create',
+            name: document.getElementById('b-name').value,
+            label: document.getElementById('b-label').value,
+            icon: document.getElementById('b-icon').value,
+            color: document.getElementById('b-color').value
+          })
+        });
+        toast('Badge created');
+        await render();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  }
+
+  async function assignOrRevoke(action) {
+    try {
+      const username = document.getElementById('ba-username').value.trim();
+      const badgeId = Number(document.getElementById('ba-badge').value);
+      const profile = await api(`/api/profile?username=${encodeURIComponent(username)}`);
+
+      await api('/api/badges', {
+        method: 'POST',
+        body: JSON.stringify({ action, userId: profile.profile.user.id, badgeId })
+      });
+
+      toast(action === 'assign' ? 'Badge assigned' : 'Badge revoked');
+      await render();
+    } catch (error) {
+      toast(error.message, true);
+    }
+  }
+
+  document.getElementById('ba-assign')?.addEventListener('click', () => assignOrRevoke('assign'));
+  document.getElementById('ba-revoke')?.addEventListener('click', () => assignOrRevoke('revoke'));
+
+  document.getElementById('changelog-new-admin')?.addEventListener('click', () => {
+    document.getElementById('cl-version').value = '';
+    document.getElementById('cl-title').value = '';
+    document.getElementById('cl-body').value = '';
+    document.getElementById('changelog-modal').classList.remove('hidden');
+  });
+}
