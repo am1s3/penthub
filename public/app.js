@@ -997,3 +997,1637 @@ window.addEventListener('hashchange', render);
   updateTopbar();
   await render();
 })();
+// === THREAD ===
+
+function threadAdminHtml(thread) {
+  if (!isStaff()) return '';
+
+  return `
+    <div class="menu-wrap">
+      <button class="icon-btn" data-menu-toggle="thread-admin">${ICONS.dots}</button>
+      <div class="menu" data-menu="thread-admin">
+        <button data-admin-thread="${thread.id}" data-admin-action="${thread.is_locked ? 'unlock' : 'lock'}">
+          ${thread.is_locked ? 'Unlock thread' : 'Lock thread'}
+        </button>
+        <button data-admin-thread="${thread.id}" data-admin-action="${thread.is_pinned ? 'unpin' : 'pin'}">
+          ${thread.is_pinned ? 'Unpin thread' : 'Pin thread'}
+        </button>
+        <button data-admin-thread="${thread.id}" data-admin-action="delete" class="danger">Delete thread</button>
+      </div>
+    </div>
+  `;
+}
+
+function reactionsHtml(post) {
+  const counts = post.reactions || [];
+
+  const countButtons = counts
+    .map(
+      (r) => `
+        <button class="action ${post.my_reaction === r.emoji ? 'active' : ''}" data-react-post="${post.id}" data-react-emoji="${r.emoji}">
+          ${r.emoji} ${r.count}
+        </button>
+      `
+    )
+    .join('');
+
+  return `
+    <div class="action-bar">
+      ${countButtons}
+      <div class="menu-wrap">
+        <button class="action" data-menu-toggle="react-${post.id}">+ react</button>
+        <div class="menu" data-menu="react-${post.id}">
+          ${REACTION_EMOJIS.map((e) => `<button data-react-post="${post.id}" data-react-emoji="${e}">${e}</button>`).join('')}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function actionBarHtml(post) {
+  const canEdit = state.me && (state.me.id === post.user_id || isStaff());
+  const shareUrl = `${location.origin}/#/thread/${post.thread_id}#post-${post.id}`;
+
+  return `
+    <div class="action-bar">
+      ${shareButtonHtml(shareUrl, `Post by @${post.username}`)}
+      ${canEdit ? `<button class="action" data-edit-post="${post.id}">Edit</button>` : ''}
+      ${state.me ? `<button class="action" data-report-post="${post.id}">Report</button>` : ''}
+      ${isStaff() ? `
+        <div class="menu-wrap">
+          <button class="action" data-menu-toggle="post-menu-${post.id}">${ICONS.dots} More</button>
+          <div class="menu" data-menu="post-menu-${post.id}">
+            <button data-admin-post="${post.id}" data-admin-action="delete" class="danger">Delete post</button>
+          </div>
+        </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+function postHtml(post) {
+  const edited = post.updated_at > post.created_at ? '<span class="edited">(edited)</span>' : '';
+
+  return `
+    <article class="post" id="post-${post.id}">
+      ${avatarHtml(post.username, '', post.avatar || '')}
+      <div class="post-main">
+        <div class="feed-head">
+          <span class="feed-name">${userLink(post)}</span>
+          ${badgesHtml(post.badges, post)}
+          <span class="muted">· ${time(post.created_at)} ${edited}</span>
+        </div>
+        <div class="post-body">${mdToHtml(post.body)}</div>
+        ${state.me ? reactionsHtml(post) : ''}
+        ${actionBarHtml(post)}
+      </div>
+    </article>
+  `;
+}
+
+function replyFormHtml(thread) {
+  if (!state.me) return `<p class="notice"><a href="#/login">Log in</a> to reply.</p>`;
+  if (thread.is_locked && !isStaff()) return `<p class="notice warn">Thread is locked.</p>`;
+
+  return `
+    <form id="reply-form" class="form">
+      <label>
+        Reply
+        <textarea id="reply-body" maxlength="10000" required minlength="1"></textarea>
+      </label>
+      <p class="muted">Markdown: **bold**, *italic*, \`code\`, \`\`\`blocks\`\`\`, lists, &gt; quotes, [link](https://...), @mentions</p>
+      <button class="btn" type="submit">Reply</button>
+      <div id="reply-error" class="form-error"></div>
+    </form>
+  `;
+}
+
+function renderThread(id, query) {
+  return async function threadView() {
+    const threadId = Number(id);
+    if (!Number.isInteger(threadId)) throw new Error('Invalid thread');
+
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+
+    const [{ thread }, postsData] = await Promise.all([
+      api(`/api/thread?id=${threadId}`),
+      api(`/api/posts?threadId=${threadId}&page=${page}`)
+    ]);
+
+    const posts = postsData.posts || [];
+    const base = `#/thread/${threadId}`;
+
+    app.innerHTML = `
+      <section class="page-head">
+        <div>
+          <h1>${esc(thread.title)}</h1>
+          <div class="feed-tags">
+            <a class="chip" href="#/category/${encodeURIComponent(thread.category_slug)}">${esc(thread.category_name)}</a>
+            ${(thread.tags || []).map((tag) => `<a class="chip tag" href="#/tag/${encodeURIComponent(tag)}">#${esc(tag)}</a>`).join('')}
+            <span class="muted">by ${userLink(thread)} · ${time(thread.created_at)}</span>
+          </div>
+        </div>
+        <div class="top-actions">
+          ${shareButtonHtml(`${location.origin}/#/thread/${threadId}`, thread.title)}
+          ${threadAdminHtml(thread)}
+        </div>
+      </section>
+
+      <section>${posts.map(postHtml).join('')}</section>
+
+      ${paginationHtml(base, page, Boolean(postsData.hasMore))}
+
+      <section class="card">
+        <h2>Reply</h2>
+        ${replyFormHtml(thread)}
+      </section>
+    `;
+
+    bindThreadPage(thread, posts);
+    attachShareHandlers(app);
+  };
+}
+
+function bindThreadPage(thread, posts) {
+  const replyForm = document.getElementById('reply-form');
+
+  if (replyForm) {
+    replyForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const errorEl = document.getElementById('reply-error');
+      const body = document.getElementById('reply-body').value;
+
+      try {
+        await api('/api/posts', { method: 'POST', body: JSON.stringify({ threadId: thread.id, body }) });
+        toast('Reply published');
+        await render();
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    });
+  }
+
+  document.querySelectorAll('[data-report-post]').forEach((button) => {
+    button.addEventListener('click', () => openReportModal(Number(button.dataset.reportPost)));
+  });
+
+  document.querySelectorAll('[data-edit-post]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const post = posts.find((p) => p.id === Number(button.dataset.editPost));
+      if (post) startEditPost(post);
+    });
+  });
+
+  document.querySelectorAll('[data-react-post]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        await api('/api/react', {
+          method: 'POST',
+          body: JSON.stringify({ postId: Number(button.dataset.reactPost), emoji: button.dataset.reactEmoji })
+        });
+        await render();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-admin-thread]').forEach((button) => {
+    button.addEventListener('click', () => adminAction('thread', Number(button.dataset.adminThread), button.dataset.adminAction));
+  });
+
+  document.querySelectorAll('[data-admin-post]').forEach((button) => {
+    button.addEventListener('click', () => adminAction('post', Number(button.dataset.adminPost), button.dataset.adminAction));
+  });
+
+  document.querySelectorAll('[data-menu-toggle]').forEach((button) => {
+    button.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const name = button.dataset.menuToggle;
+      const menu = button.parentElement.querySelector(`[data-menu="${name}"]`);
+      if (menu) openMenu(menu);
+    });
+  });
+
+  attachShareHandlers(app);
+}
+
+function startEditPost(post) {
+  const article = document.getElementById(`post-${post.id}`);
+  if (!article) return;
+
+  const bodyEl = article.querySelector('.post-body');
+
+  bodyEl.innerHTML = `
+    <textarea id="edit-body-${post.id}" maxlength="10000">${esc(post.body)}</textarea>
+    <div class="admin-controls">
+      <button class="btn small" data-edit-save="${post.id}">Save</button>
+      <button class="btn ghost small" data-edit-cancel="${post.id}">Cancel</button>
+    </div>
+    <div class="form-error" id="edit-error-${post.id}"></div>
+  `;
+
+  document.querySelector(`[data-edit-save="${post.id}"]`).addEventListener('click', async () => {
+    const newBody = document.getElementById(`edit-body-${post.id}`).value;
+    const errorEl = document.getElementById(`edit-error-${post.id}`);
+
+    try {
+      await api('/api/posts', { method: 'PATCH', body: JSON.stringify({ postId: post.id, body: newBody }) });
+      toast('Post updated');
+      await render();
+    } catch (error) {
+      errorEl.textContent = error.message;
+    }
+  });
+
+  document.querySelector(`[data-edit-cancel="${post.id}"]`).addEventListener('click', () => render());
+}
+
+async function adminAction(type, id, action, extra = {}) {
+  try {
+    await api('/api/admin', { method: 'POST', body: JSON.stringify({ type, id, action, ...extra }) });
+    toast('Done');
+    await render();
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+// === PROFILE ===
+
+function renderProfile(username, query) {
+  return async function profileView() {
+    const data = await api(`/api/profile?username=${encodeURIComponent(username)}`);
+    const p = data.profile;
+    const isOwn = state.me && state.me.id === p.user.id;
+    const tab = query.get('tab') === 'posts' ? 'posts' : query.get('tab') === 'mentions' ? 'mentions' : 'threads';
+
+    let content = '';
+
+    if (tab === 'threads') {
+      content = p.threads.length ? p.threads.map(threadRowHtml).join('') : '<section class="empty">No threads yet.</section>';
+    } else if (tab === 'posts') {
+      content = p.posts.length
+        ? p.posts
+            .map(
+              (post) => `
+                <article class="post">
+                  ${avatarHtml(p.user.username, '', p.user.avatar || '')}
+                  <div class="post-main">
+                    <div class="feed-head">
+                      <span class="muted">in <a href="#/thread/${Number(post.thread_id)}">${esc(post.thread_title)}</a> · ${time(post.created_at)}</span>
+                    </div>
+                    <div class="post-body">${mdToHtml(post.body.slice(0, 400))}</div>
+                  </div>
+                </article>
+              `
+            )
+            .join('')
+        : '<section class="empty">No posts yet.</section>';
+    } else {
+      content = p.mentions.length
+        ? p.mentions
+            .map(
+              (m) => `
+                <article class="post">
+                  ${avatarHtml(m.author, '')}
+                  <div class="post-main">
+                    <div class="feed-head">
+                      <span class="muted">mentioned by ${userLink(m.author)} in <a href="#/thread/${Number(m.thread_id)}">${esc(m.thread_title)}</a> · ${time(m.created_at)}</span>
+                    </div>
+                    <div class="post-body muted">${esc((m.body || '').slice(0, 200))}</div>
+                  </div>
+                </article>
+              `
+            )
+            .join('')
+        : '<section class="empty">No mentions yet.</section>';
+    }
+
+    const bannerStyle = p.user.banner ? `background-image:url('${esc(p.user.banner)}')` : '';
+
+    app.innerHTML = `
+      <div class="banner-wrap" style="${bannerStyle}"></div>
+      <section class="profile-head">
+        ${avatarHtml(p.user.username, '', p.user.avatar || '')}
+        <div style="flex:1;min-width:0">
+          <div class="feed-head">
+            <span class="feed-name">${esc(displayName(p.user))}</span>
+            ${badgesHtml(p.user.badges, p.user)}
+            <span class="muted">@${esc(p.user.username)}</span>
+          </div>
+          <div class="muted">joined ${time(p.user.created_at)} · ${p.user.thread_count} threads · ${p.user.post_count} posts</div>
+          <div class="post-body">${p.user.bio ? mdToHtml(p.user.bio) : '<span class="muted">No bio yet.</span>'}</div>
+          <div class="admin-controls">
+            ${state.me && !isOwn ? `<a class="btn small" href="#/messages/new?to=${encodeURIComponent(p.user.username)}">Send PM</a>` : ''}
+            ${isOwn ? `<a class="btn ghost small" href="#/settings">Edit profile</a>` : ''}
+            ${shareButtonHtml(`${location.origin}/#/user/${encodeURIComponent(p.user.username)}`, `@${p.user.username} on PentHub`)}
+          </div>
+        </div>
+      </section>
+
+      <nav class="tabs">
+        <a class="tab ${tab === 'threads' ? 'active' : ''}" href="#/user/${encodeURIComponent(username)}?tab=threads">Threads</a>
+        <a class="tab ${tab === 'posts' ? 'active' : ''}" href="#/user/${encodeURIComponent(username)}?tab=posts">Posts</a>
+        <a class="tab ${tab === 'mentions' ? 'active' : ''}" href="#/user/${encodeURIComponent(username)}?tab=mentions">Mentions</a>
+      </nav>
+
+      ${content}
+    `;
+
+    attachShareHandlers(app);
+  };
+}
+
+// === SETTINGS ===
+
+function renderSettings() {
+  return async function settingsView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const data = await api('/api/settings');
+    const p = data.profile;
+
+    app.innerHTML = `
+      <section class="card wide">
+        <h1>Settings</h1>
+
+        <h2>Profile</h2>
+        <form id="settings-profile" class="form">
+          <label>Display name <input id="s-display" class="input" maxlength="40" value="${esc(p.display_name || '')}" /></label>
+          <label>Username <input class="input" value="${esc(p.username)}" disabled /></label>
+          <label>Bio <textarea id="s-bio" maxlength="500">${esc(p.bio || '')}</textarea></label>
+          <button class="btn small" type="submit">Save profile</button>
+          <div id="profile-error" class="form-error"></div>
+        </form>
+
+        <h2>Avatar</h2>
+        <div class="image-upload">
+          <div class="preview" id="s-avatar-preview">
+            ${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : avatarHtml(p.username)}
+          </div>
+          <input type="file" id="s-avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" />
+          <button class="btn small" type="button" id="s-avatar-upload">Upload</button>
+          <button class="btn ghost small" type="button" id="s-avatar-clear">Clear</button>
+        </div>
+        <p class="muted">PNG/JPEG/WebP/GIF, up to 256KB.</p>
+
+        <h2>Banner</h2>
+        <div class="image-upload">
+          <div class="preview banner" id="s-banner-preview" style="${p.banner ? `background-image:url('${esc(p.banner)}')` : ''}"></div>
+          <input type="file" id="s-banner-file" accept="image/png,image/jpeg,image/webp" />
+          <button class="btn small" type="button" id="s-banner-upload">Upload</button>
+          <button class="btn ghost small" type="button" id="s-banner-clear">Clear</button>
+        </div>
+        <p class="muted">PNG/JPEG/WebP, up to 512KB.</p>
+
+        <h2>Change password</h2>
+        <form id="settings-password" class="form">
+          <label>Current password <input id="s-current" class="input" type="password" required /></label>
+          <label>New password <input id="s-new" class="input" type="password" required minlength="12" maxlength="128" /></label>
+          <button class="btn small" type="submit">Change password</button>
+          <div id="password-error" class="form-error"></div>
+        </form>
+
+        <h2>Recovery code</h2>
+        <p class="muted">Rotate your recovery code. The old one will stop working.</p>
+        <form id="settings-recovery" class="form">
+          <label>Current recovery code <input id="s-rec" class="input" autocomplete="off" required placeholder="PH-XXXX-XXXX-XXXX-XXXX" /></label>
+          <button class="btn small" type="submit">Rotate recovery code</button>
+          <div id="recovery-error" class="form-error"></div>
+        </form>
+      </section>
+    `;
+
+    document.getElementById('settings-profile').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const display_name = document.getElementById('s-display').value;
+      const bio = document.getElementById('s-bio').value;
+      const errorEl = document.getElementById('profile-error');
+
+      try {
+        await api('/api/settings', { method: 'POST', body: JSON.stringify({ field: 'profile', display_name, bio }) });
+        toast('Profile saved');
+        await loadMe();
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    });
+
+    const fileToDataURL = (file, maxSize) => new Promise((resolve, reject) => {
+      if (!file) return reject(new Error('No file'));
+      if (file.size > maxSize) return reject(new Error(`File too big (${Math.round(file.size / 1024)}KB)`));
+
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('Read error'));
+      reader.readAsDataURL(file);
+    });
+
+    document.getElementById('s-avatar-upload').addEventListener('click', async () => {
+      const file = document.getElementById('s-avatar-file').files[0];
+
+      try {
+        const dataUrl = await fileToDataURL(file, 262144);
+        await api('/api/settings', { method: 'POST', body: JSON.stringify({ field: 'avatar', avatar: dataUrl }) });
+        document.getElementById('s-avatar-preview').innerHTML = `<img src="${esc(dataUrl)}" alt="">`;
+        toast('Avatar updated');
+        await loadMe();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+
+    document.getElementById('s-avatar-clear').addEventListener('click', async () => {
+      try {
+        await api('/api/settings', { method: 'POST', body: JSON.stringify({ field: 'avatar', avatar: '' }) });
+        document.getElementById('s-avatar-preview').innerHTML = avatarHtml(p.username).toString();
+        toast('Avatar cleared');
+        await loadMe();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+
+    document.getElementById('s-banner-upload').addEventListener('click', async () => {
+      const file = document.getElementById('s-banner-file').files[0];
+
+      try {
+        const dataUrl = await fileToDataURL(file, 524288);
+        await api('/api/settings', { method: 'POST', body: JSON.stringify({ field: 'banner', banner: dataUrl }) });
+        document.getElementById('s-banner-preview').style.backgroundImage = `url('${dataUrl}')`;
+        toast('Banner updated');
+        await loadMe();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+
+    document.getElementById('s-banner-clear').addEventListener('click', async () => {
+      try {
+        await api('/api/settings', { method: 'POST', body: JSON.stringify({ field: 'banner', banner: '' }) });
+        document.getElementById('s-banner-preview').style.backgroundImage = '';
+        toast('Banner cleared');
+        await loadMe();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+
+    document.getElementById('settings-password').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const current_password = document.getElementById('s-current').value;
+      const new_password = document.getElementById('s-new').value;
+      const errorEl = document.getElementById('password-error');
+
+      try {
+        await api('/api/settings', { method: 'POST', body: JSON.stringify({ field: 'password', current_password, new_password }) });
+        toast('Password changed. You stay logged in here, other sessions are revoked.');
+        document.getElementById('s-current').value = '';
+        document.getElementById('s-new').value = '';
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    });
+
+    document.getElementById('settings-recovery').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const recoveryCode = document.getElementById('s-rec').value;
+      const errorEl = document.getElementById('recovery-error');
+
+      try {
+        const data = await api('/api/settings', { method: 'POST', body: JSON.stringify({ field: 'recovery', recoveryCode }) });
+        toast('Recovery code rotated');
+        if (data.recoveryCode) showRecoveryModal(data.recoveryCode);
+        document.getElementById('s-rec').value = '';
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    });
+  };
+}
+
+// === SUPPORT / TICKETS ===
+
+function renderSupport(query) {
+  return async function supportView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+    const data = await api(`/api/tickets?page=${page}`);
+    const tickets = data.tickets || [];
+
+    app.innerHTML = `
+      <section class="page-head">
+        <h1>Support</h1>
+        <button class="btn small" id="support-new">+ New ticket</button>
+      </section>
+
+      <p class="muted">Use tickets for account issues, bug reports or questions to the team. For public discussions, post in a category.</p>
+
+      ${tickets.length ? `
+        <section class="thread-list">
+          ${tickets.map((t) => `
+            <a class="feed-row" href="#/ticket/${Number(t.id)}">
+              <span class="notif-icon">${t.status === 'open' ? '?' : '✓'}</span>
+              <div class="feed-main">
+                <div class="feed-head">
+                  <span class="chip ${t.status === 'open' ? 'warn' : 'green'}">${esc(t.status)}</span>
+                  <span class="feed-name">${esc(t.subject)}</span>
+                  ${t.username ? `<span class="muted">· @${esc(t.username)}</span>` : ''}
+                </div>
+                <div class="muted">Updated ${time(t.updated_at)}</div>
+              </div>
+            </a>
+          `).join('')}
+        </section>
+      ` : '<section class="empty">No tickets yet.</section>'}
+
+      ${paginationHtml('#/support', page, Boolean(data.hasMore))}
+    `;
+
+    document.getElementById('support-new').addEventListener('click', () => {
+      const subject = prompt('Subject (up to 100 characters):');
+      if (!subject) return;
+      const body = prompt('Describe the issue (up to 5000 characters):');
+      if (!body) return;
+
+      api('/api/tickets', { method: 'POST', body: JSON.stringify({ action: 'create', subject, body }) })
+        .then((res) => { location.hash = `#/ticket/${res.id}`; })
+        .catch((err) => toast(err.message, true));
+    });
+  };
+}
+
+function renderTicket(ticketId) {
+  return async function ticketView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const data = await api(`/api/tickets?id=${ticketId}`);
+    const { ticket, messages } = data;
+
+    app.innerHTML = `
+      <section class="page-head">
+        <div>
+          <h1>${esc(ticket.subject)}</h1>
+          <div class="feed-tags">
+            <span class="chip ${ticket.status === 'open' ? 'warn' : 'green'}">${esc(ticket.status)}</span>
+            <span class="muted">Opened ${time(ticket.created_at)} · Updated ${time(ticket.updated_at)}</span>
+          </div>
+        </div>
+        <a class="btn ghost small" href="#/support">Back</a>
+      </section>
+
+      <section>
+        ${messages.map((m) => `
+          <article class="post">
+            ${avatarHtml(m.username, '', '')}
+            <div class="post-main">
+              <div class="feed-head">
+                <span class="feed-name">${userLink(m.username)}</span>
+                ${m.is_staff ? '<span class="chip green">staff</span>' : ''}
+                <span class="muted">· ${time(m.created_at)}</span>
+              </div>
+              <div class="post-body">${mdToHtml(m.body)}</div>
+            </div>
+          </article>
+        `).join('')}
+      </section>
+
+      ${ticket.status === 'closed' && !isStaff() ? '<p class="notice">This ticket is closed.</p>' : `
+        <form id="ticket-reply" class="form">
+          <label>
+            Reply
+            <textarea id="ticket-body" maxlength="5000" required minlength="1"></textarea>
+          </label>
+          <div class="admin-controls">
+            <button class="btn" type="submit">Send</button>
+            ${isStaff() ? `
+              <button class="btn ghost" type="button" data-ticket-close="${ticket.id}">
+                ${ticket.status === 'closed' ? 'Reopen' : 'Close ticket'}
+              </button>
+            ` : ''}
+          </div>
+          <div id="ticket-error" class="form-error"></div>
+        </form>
+      `}
+    `;
+
+    const replyForm = document.getElementById('ticket-reply');
+
+    if (replyForm) {
+      replyForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const body = document.getElementById('ticket-body').value;
+        const errorEl = document.getElementById('ticket-error');
+
+        try {
+          await api('/api/tickets', { method: 'POST', body: JSON.stringify({ action: 'reply', ticketId, body }) });
+          toast('Reply sent');
+          await render();
+        } catch (error) {
+          errorEl.textContent = error.message;
+        }
+      });
+    }
+
+    const closeBtn = document.querySelector('[data-ticket-close]');
+
+    if (closeBtn) {
+      closeBtn.addEventListener('click', async () => {
+        try {
+          const action = ticket.status === 'closed' ? 'reopen' : 'close';
+          await api('/api/tickets', { method: 'POST', body: JSON.stringify({ action, ticketId }) });
+          toast('Ticket updated');
+          await render();
+        } catch (error) {
+          toast(error.message, true);
+        }
+      });
+    }
+  };
+}
+
+// === APPEAL ===
+
+function renderAppeal() {
+  return async function appealView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    let appeals = [];
+
+    try {
+      const data = await api('/api/appeals?mine=1');
+      appeals = data.appeals || [];
+    } catch {
+      // ignore
+    }
+
+    const pending = appeals.find((a) => a.status === 'pending');
+
+    app.innerHTML = `
+      <section class="card narrow">
+        <h1>Appeal suspension</h1>
+
+        ${state.me.banned ? `
+          <div class="notice warn">
+            <strong>Reason:</strong> ${esc(state.me.ban_reason || '—')}
+            <br><span class="muted">Banned ${state.me.banned_at ? time(state.me.banned_at) : ''}</span>
+          </div>
+        ` : '<p>You are not currently suspended.</p>'}
+
+        ${pending ? `
+          <p class="notice">You already have a pending appeal submitted on ${time(pending.created_at)}.</p>
+        ` : state.me.banned ? `
+          <p class="muted">Write a short, honest explanation. Frivolous appeals are rejected.</p>
+          <form id="appeal-form" class="form">
+            <label>
+              Reason
+              <textarea id="appeal-body" maxlength="2000" required minlength="20"></textarea>
+            </label>
+            <button class="btn" type="submit">Submit appeal</button>
+            <div id="appeal-error" class="form-error"></div>
+          </form>
+        ` : ''}
+
+        ${appeals.length ? `
+          <h2>Your appeals</h2>
+          ${appeals.map((a) => `
+            <article class="admin-row">
+              <div class="admin-row-head">
+                <span class="chip ${a.status === 'pending' ? 'warn' : a.status === 'approved' ? 'green' : 'danger'}">${esc(a.status)}</span>
+                <span class="muted">${time(a.created_at)}</span>
+              </div>
+              <div class="post-body">${esc(a.reason)}</div>
+            </article>
+          `).join('')}
+        ` : ''}
+
+        <div class="admin-controls">
+          <a class="btn ghost small" href="#/settings">Settings</a>
+          <a class="btn ghost small" href="#/support">Open support ticket</a>
+          <button id="appeal-logout" class="btn danger small">Log out</button>
+        </div>
+      </section>
+    `;
+
+    document.getElementById('appeal-logout')?.addEventListener('click', logout);
+
+    const form = document.getElementById('appeal-form');
+
+    if (form) {
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const reason = document.getElementById('appeal-body').value;
+        const errorEl = document.getElementById('appeal-error');
+
+        try {
+          await api('/api/appeals', { method: 'POST', body: JSON.stringify({ action: 'submit', reason }) });
+          toast('Appeal submitted');
+          await render();
+        } catch (error) {
+          errorEl.textContent = error.message;
+        }
+      });
+    }
+  };
+}
+
+// === CHANGELOG ===
+
+function renderChangelog(query) {
+  return async function changelogView() {
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+    const data = await api(`/api/changelog?page=${page}`);
+    const items = data.items || [];
+
+    if (state.me && data.latest_id) {
+      state.changelogSeenId = data.latest_id;
+      localStorage.setItem('penthub_changelog_seen', String(data.latest_id));
+      whatsnewBar.classList.add('hidden');
+    }
+
+    app.innerHTML = `
+      <section class="page-head">
+        <h1>What's new</h1>
+        ${state.me?.isAdmin ? `
+          <button class="btn small" id="changelog-new">+ New release</button>
+        ` : ''}
+      </section>
+
+      ${items.map((c) => `
+        <article class="card" style="margin-bottom:14px">
+          <div class="feed-head">
+            <span class="chip green">${esc(c.version)}</span>
+            <span class="feed-name">${esc(c.title)}</span>
+            <span class="muted">· ${time(c.created_at)}</span>
+          </div>
+          <div class="post-body">${mdToHtml(c.body)}</div>
+        </article>
+      `).join('') || '<section class="empty">No changelog yet.</section>'}
+
+      ${paginationHtml('#/changelog', page, Boolean(data.hasMore))}
+    `;
+
+    document.getElementById('changelog-new')?.addEventListener('click', () => {
+      const version = prompt('Version (e.g. 1.1.0):');
+      if (!version) return;
+      const title = prompt('Title:');
+      if (!title) return;
+      const body = prompt('Body (markdown):');
+      if (!body) return;
+
+      api('/api/changelog', { method: 'POST', body: JSON.stringify({ version, title, body }) })
+        .then(() => { toast('Published'); render(); })
+        .catch((err) => toast(err.message, true));
+    });
+  };
+}
+
+// === FIRMWARE HUB ===
+
+function renderFirmwareHub() {
+  return async function firmwareHubView() {
+    let releases = [];
+
+    try {
+      const data = await api('/api/releases');
+      releases = data.releases || [];
+    } catch {
+      // ignore
+    }
+
+    app.innerHTML = `
+      <section class="welcome-hero">
+        <h1>Firmware Hub</h1>
+        <p>Latest releases from security hardware and firmware projects, auto-synced from GitHub.</p>
+      </section>
+
+      <section class="feature-grid">
+        <a class="feature-card" href="#/firmware/bruce/wiki">
+          <h3>Bruce wiki</h3>
+          <p>Original content at wiki.bruce.computer, with curated summaries and safe links.</p>
+        </a>
+        <a class="feature-card" href="#/releases">
+          <h3>All releases</h3>
+          <p>Full feed of synced firmware releases with direct links to GitHub.</p>
+        </a>
+        <a class="feature-card" href="#/category/esp32-security-lab">
+          <h3>ESP32 category</h3>
+          <p>Community discussions around ESP32-based security projects.</p>
+        </a>
+        <a class="feature-card" href="#/category/flipper-zero-research">
+          <h3>Flipper Zero</h3>
+          <p>Protocol research on your own devices in a controlled lab.</p>
+        </a>
+      </section>
+
+      <section class="page-head"><h2>Latest releases</h2></section>
+
+      ${releases.slice(0, 10).map((r) => `
+        <article class="card" style="margin-bottom:10px">
+          <div class="feed-head">
+            <span class="chip tag">${esc(r.source)}</span>
+            <span class="chip">${esc(r.tag)}</span>
+            <span class="muted">· ${time(r.published_at)}</span>
+          </div>
+          <h3>${esc(r.title)}</h3>
+          <div class="post-body">${mdToHtml((r.body || '').slice(0, 400))}</div>
+          <div class="admin-controls">
+            ${r.url ? `<a class="btn small" href="${esc(r.url)}" target="_blank" rel="noopener">View on GitHub</a>` : ''}
+            ${r.thread_id ? `<a class="btn ghost small" href="#/thread/${Number(r.thread_id)}">Discuss</a>` : ''}
+          </div>
+        </article>
+      `).join('') || '<section class="empty">No releases synced yet. The cron runs hourly.</section>'}
+    `;
+  };
+}
+
+function renderBruceWiki() {
+  return function wikiView() {
+    const original = 'https://wiki.bruce.computer/';
+
+    app.innerHTML = `
+      <div class="wiki-notice">
+        <strong>About this page</strong> — this is a curated index with short summaries.
+        The full, official and always-up-to-date wiki lives at
+        <a href="${original}" target="_blank" rel="noopener">${original}</a>.
+        We link to the original for every topic.
+      </div>
+
+      <section class="page-head">
+        <h1>Bruce — curated wiki index</h1>
+        <a class="btn small" href="${original}" target="_blank" rel="noopener">Open original wiki</a>
+      </section>
+
+      <article class="card" style="margin-bottom:10px">
+        <h3>Getting started</h3>
+        <div class="post-body">
+          <p>Bruce is an open-source firmware for ESP32-based security multi-tools. It bundles modules for Wi-Fi, Bluetooth, RFID, NFC, IR and Sub-GHz research in a single interface with a touch-friendly menu.</p>
+          <p><strong>Original:</strong> <a href="${original}getting-started" target="_blank" rel="noopener">wiki.bruce.computer/getting-started</a></p>
+        </div>
+      </article>
+
+      <article class="card" style="margin-bottom:10px">
+        <h3>Installation & flashing</h3>
+        <div class="post-body">
+          <p>Flashing is typically done via USB using <code>esptool</code> or a web flasher on supported boards (M5Stack Cardputer, StickC Plus 2, Lilygo T-Display and others). Always use a stable release on your own hardware.</p>
+          <p><strong>Original:</strong> <a href="${original}installation" target="_blank" rel="noopener">wiki.bruce.computer/installation</a></p>
+        </div>
+      </article>
+
+      <article class="card" style="margin-bottom:10px">
+        <h3>Wi-Fi module</h3>
+        <div class="post-body">
+          <p>Scanning, capturing handshakes, testing your own networks and running controlled lab attacks against networks you own or have written permission to audit.</p>
+          <p><strong>Original:</strong> <a href="${original}wifi" target="_blank" rel="noopener">wiki.bruce.computer/wifi</a></p>
+        </div>
+      </article>
+
+      <article class="card" style="margin-bottom:10px">
+        <h3>Bluetooth / BLE</h3>
+        <div class="post-body">
+          <p>Device discovery, GATT inspection and interaction with your own BLE peripherals. Useful for auditing IoT devices and studying pairing flows.</p>
+          <p><strong>Original:</strong> <a href="${original}bluetooth" target="_blank" rel="noopener">wiki.bruce.computer/bluetooth</a></p>
+        </div>
+      </article>
+
+      <article class="card" style="margin-bottom:10px">
+        <h3>RFID / NFC / Sub-GHz / IR</h3>
+        <div class="post-body">
+          <p>Read, emulate and replay signals on your own tags, fobs, gates and remote controls. Use these features only on equipment you own or have explicit authorization to test.</p>
+          <p><strong>Original:</strong> <a href="${original}rfid-nfc-subghz-ir" target="_blank" rel="noopener">wiki.bruce.computer/rfid-nfc-subghz-ir</a></p>
+        </div>
+      </article>
+
+      <article class="card" style="margin-bottom:10px">
+        <h3>GPIO & hardware</h3>
+        <div class="post-body">
+          <p>Pin mapping, external modules (CC1101, PN532, etc.) and hardware wiring. Great reference before you solder your own lab stand.</p>
+          <p><strong>Original:</strong> <a href="${original}gpio" target="_blank" rel="noopener">wiki.bruce.computer/gpio</a></p>
+        </div>
+      </article>
+
+      <article class="card" style="margin-bottom:10px">
+        <h3>Troubleshooting & FAQ</h3>
+        <div class="post-body">
+          <p>Common boot issues, SD card quirks, board-specific notes and how to report a bug to the maintainers.</p>
+          <p><strong>Original:</strong> <a href="${original}faq" target="_blank" rel="noopener">wiki.bruce.computer/faq</a></p>
+        </div>
+      </article>
+
+      <p class="muted">Found a broken link or want to suggest a topic? <a href="#/support">Open a support ticket.</a></p>
+    `;
+  };
+}
+
+function renderReleases() {
+  return async function releasesView() {
+    let releases = [];
+
+    try {
+      const data = await api('/api/releases');
+      releases = data.releases || [];
+    } catch {
+      // ignore
+    }
+
+    app.innerHTML = `
+      <section class="page-head">
+        <h1>All releases</h1>
+        ${shareButtonHtml(`${location.origin}/#/releases`, 'PentHub firmware releases feed')}
+      </section>
+
+      ${releases.map((r) => `
+        <article class="card" style="margin-bottom:10px">
+          <div class="feed-head">
+            <span class="chip tag">${esc(r.source)}</span>
+            <span class="chip">${esc(r.tag)}</span>
+            <span class="muted">· ${time(r.published_at)}</span>
+          </div>
+          <h3>${esc(r.title)}</h3>
+          <div class="post-body">${mdToHtml(r.body || '')}</div>
+          <div class="admin-controls">
+            ${r.url ? `<a class="btn small" href="${esc(r.url)}" target="_blank" rel="noopener">View on GitHub</a>` : ''}
+            ${r.thread_id ? `<a class="btn ghost small" href="#/thread/${Number(r.thread_id)}">Discuss</a>` : ''}
+            ${shareButtonHtml(r.url || `${location.origin}/#/releases`, `${r.source} ${r.tag}`)}
+          </div>
+        </article>
+      `).join('') || '<section class="empty">No releases synced yet.</section>'}
+    `;
+
+    attachShareHandlers(app);
+  };
+}
+
+// === WELCOME ===
+
+function renderWelcome() {
+  return async function welcomeView() {
+    app.innerHTML = `
+      <section class="welcome-hero">
+        <h1>Welcome to PentHub</h1>
+        <p>A forum for <strong>legal pentesting</strong>, hardware security labs, CTF, ESP32, Flipper Zero and defensive security.</p>
+        <p class="muted">Authorized research only. Your own devices, networks and accounts, or written permission.</p>
+        <div class="admin-controls" style="justify-content:center">
+          <a class="btn" href="#/register">Create account</a>
+          <a class="btn ghost" href="#/login">Log in</a>
+          <a class="btn ghost" href="#/rules">Read the rules</a>
+        </div>
+      </section>
+
+      <section class="feature-grid">
+        <div class="feature-card">
+          <h3>Legal & authorized</h3>
+          <p>Only authorized pentesting, your own hardware and CTF. Anything illegal is banned.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Firmware hub</h3>
+          <p>Auto-synced releases from Bruce and other security firmware projects.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Communities</h3>
+          <p>Categories grouped into Firmwares, Hardwares, Networks, Research, Training.</p>
+        </div>
+        <div class="feature-card">
+          <h3>Staff & moderation</h3>
+          <p>Reports, audit log, appeals, badges, tickets and a transparent changelog.</p>
+        </div>
+      </section>
+
+      <div class="admin-controls" style="justify-content:center">
+        <button class="btn ghost" id="welcome-skip">Skip welcome and enter the forum</button>
+      </div>
+    `;
+
+    document.getElementById('welcome-skip').addEventListener('click', () => {
+      state.welcomeSeen = true;
+      localStorage.setItem('penthub_welcome_seen', '1');
+      location.hash = '#/';
+    });
+  };
+}
+
+// === NEW THREAD ===
+
+function renderNewThread(query) {
+  return async function newThreadView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const categories = await ensureCategories();
+    const selectedCategory = query.get('category') || '';
+
+    app.innerHTML = `
+      <section class="card narrow">
+        <h1>New thread</h1>
+        <p class="muted">Legal research, education, CTF, defensive security or authorized pentesting only.</p>
+        <form id="new-thread-form" class="form">
+          <label>
+            Category
+            <select id="thread-category" required>
+              <option value="">Pick a category</option>
+              ${categories.map((c) => `<option value="${c.id}" ${c.slug === selectedCategory ? 'selected' : ''}>${esc(c.section)} · ${esc(c.name)}</option>`).join('')}
+            </select>
+          </label>
+          <label>Title <input id="thread-title" class="input" required minlength="4" maxlength="160" /></label>
+          <label>Tags (comma separated, max 5) <input id="thread-tags" class="input" maxlength="120" placeholder="esp32, lab, wifi-audit" /></label>
+          <label>First post <textarea id="thread-body" required minlength="1" maxlength="10000"></textarea></label>
+          <p class="muted">Markdown: **bold**, *italic*, \`code\`, \`\`\`blocks\`\`\`, lists, &gt; quotes, [link](https://...), @mentions</p>
+          <button class="btn" type="submit">Publish</button>
+          <div id="form-error" class="form-error"></div>
+        </form>
+      </section>
+    `;
+
+    document.getElementById('new-thread-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const categoryId = Number(document.getElementById('thread-category').value);
+      const title = document.getElementById('thread-title').value.trim();
+      const body = document.getElementById('thread-body').value;
+      const tags = document.getElementById('thread-tags').value;
+      const errorEl = document.getElementById('form-error');
+
+      try {
+        const data = await api('/api/threads', { method: 'POST', body: JSON.stringify({ categoryId, title, body, tags }) });
+        toast('Thread created');
+        location.hash = `#/thread/${data.id}`;
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    });
+  };
+}
+
+// === SEARCH ===
+
+function renderSearch(query) {
+  return async function searchView() {
+    const q = (query.get('q') || '').trim();
+
+    if (q.length < 3) {
+      app.innerHTML = '<section class="card narrow"><h1>Search</h1><p class="notice">Enter at least 3 characters.</p></section>';
+      return;
+    }
+
+    const data = await api(`/api/search?q=${encodeURIComponent(q)}`);
+    const results = data.results || [];
+
+    app.innerHTML = `
+      <section class="page-head"><h1>Search: ${esc(q)}</h1></section>
+      ${results.length ? results.map(threadRowHtml).join('') : '<section class="empty">Nothing found.</section>'}
+    `;
+  };
+}
+
+// === NOTIFICATIONS ===
+
+function notifRowHtml(n) {
+  const icon = n.type === 'mention' ? '@' : n.type === 'reaction' ? '★' : '↩';
+
+  return `
+    <a class="feed-row ${n.read_at ? '' : 'unread'}" href="${n.thread_id ? `#/thread/${Number(n.thread_id)}` : '#/notifications'}">
+      <span class="notif-icon">${icon}</span>
+      <div class="feed-main">
+        <div class="feed-head">
+          <span class="feed-name">${n.actor ? '@' + esc(n.actor) : 'system'}</span>
+          <span class="muted">· ${n.type} · ${time(n.created_at)}</span>
+        </div>
+        ${n.thread_title ? `<div class="muted">${esc(n.thread_title)}</div>` : ''}
+      </div>
+    </a>
+  `;
+}
+
+function renderNotifications(query) {
+  return async function notificationsView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+    const data = await api(`/api/notifications?page=${page}`);
+
+    api('/api/notifications/read', { method: 'POST' }).catch(() => {});
+    loadMe().then(() => { updateTopbar(); updateSidebar(); });
+
+    const items = data.notifications || [];
+
+    app.innerHTML = `
+      <section class="page-head"><h1>Notifications</h1></section>
+      ${items.length ? items.map(notifRowHtml).join('') : '<section class="empty">No notifications.</section>'}
+      ${paginationHtml('#/notifications', page, Boolean(data.hasMore))}
+    `;
+  };
+}
+
+// === MESSAGES ===
+
+function pmRowHtml(m, box) {
+  const other = box === 'inbox' ? m.sender_username : m.recipient_username;
+  const unread = box === 'inbox' && !m.read_at;
+
+  return `
+    <a class="feed-row ${unread ? 'unread' : ''}" href="#/messages/user/${encodeURIComponent(other)}">
+      ${avatarHtml(other, '', '')}
+      <div class="feed-main">
+        <div class="feed-head"><span class="feed-name">@${esc(other)}</span><span class="muted">· ${time(m.created_at)}</span></div>
+        <div class="muted">${esc((m.body || '').slice(0, 120))}</div>
+      </div>
+    </a>
+  `;
+}
+
+function renderMessages(query) {
+  return async function messagesView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const box = query.get('box') === 'outbox' ? 'outbox' : 'inbox';
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+    const data = await api(`/api/messages?box=${box}&page=${page}`);
+    const messages = data.messages || [];
+
+    app.innerHTML = `
+      <section class="page-head">
+        <h1>Messages</h1>
+        <a class="btn small" href="#/messages/new">New message</a>
+      </section>
+
+      <nav class="tabs">
+        <a class="tab ${box === 'inbox' ? 'active' : ''}" href="#/messages?box=inbox">Inbox</a>
+        <a class="tab ${box === 'outbox' ? 'active' : ''}" href="#/messages?box=outbox">Outbox</a>
+      </nav>
+
+      ${messages.length ? messages.map((m) => pmRowHtml(m, box)).join('') : '<section class="empty">No messages.</section>'}
+
+      ${paginationHtml(`#/messages?box=${box}`, page, Boolean(data.hasMore))}
+    `;
+  };
+}
+
+function renderConversation(username, query) {
+  return async function conversationView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+    const data = await api(`/api/messages?with=${encodeURIComponent(username)}&page=${page}`);
+    const messages = data.messages || [];
+
+    loadMe().then(() => { updateTopbar(); updateSidebar(); });
+
+    app.innerHTML = `
+      <section class="page-head">
+        <h1>Chat with ${userLink(data.with.username)}</h1>
+        <a class="btn ghost small" href="#/messages">Inbox</a>
+      </section>
+
+      ${messages.map((m) => postHtml({ ...m, username: m.sender_username, is_admin: false, badges: [], reactions: [] })).join('') || '<section class="empty">No messages yet.</section>'}
+
+      ${paginationHtml(`#/messages/user/${encodeURIComponent(username)}`, page, Boolean(data.hasMore))}
+
+      <form id="pm-reply-form" class="form">
+        <label>Message <textarea id="pm-reply-body" maxlength="5000" required minlength="1"></textarea></label>
+        <button class="btn" type="submit">Send</button>
+        <div id="pm-reply-error" class="form-error"></div>
+      </form>
+    `;
+
+    document.getElementById('pm-reply-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const body = document.getElementById('pm-reply-body').value;
+      const errorEl = document.getElementById('pm-reply-error');
+
+      try {
+        await api('/api/messages', { method: 'POST', body: JSON.stringify({ toUsername: username, body }) });
+        toast('Sent');
+        await render();
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    });
+  };
+}
+
+function renderNewMessage(query) {
+  return function newMessageView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const to = query.get('to') || '';
+
+    app.innerHTML = `
+      <section class="card narrow">
+        <h1>New message</h1>
+        <form id="pm-new-form" class="form">
+          <label>To <input id="pm-to" class="input" required minlength="3" maxlength="32" value="${esc(to)}" /></label>
+          <label>Message <textarea id="pm-body" maxlength="5000" required minlength="1"></textarea></label>
+          <button class="btn" type="submit">Send</button>
+          <div id="pm-error" class="form-error"></div>
+        </form>
+      </section>
+    `;
+
+    document.getElementById('pm-new-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const toUsername = document.getElementById('pm-to').value.trim();
+      const body = document.getElementById('pm-body').value;
+      const errorEl = document.getElementById('pm-error');
+
+      try {
+        await api('/api/messages', { method: 'POST', body: JSON.stringify({ toUsername, body }) });
+        toast('Sent');
+        location.hash = `#/messages/user/${encodeURIComponent(toUsername)}`;
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    });
+  };
+}
+
+// === ADMIN ===
+
+function reportRowHtml(report) {
+  const bodyPreview = report.post_body || '';
+
+  return `
+    <article class="admin-row">
+      <div class="admin-row-head">
+        <span class="chip ${report.status === 'open' ? 'warn' : ''}">${esc(report.status)}</span>
+        <span class="muted">reported by @${esc(report.reporter)}</span>
+        <span class="muted">· ${time(report.created_at)}</span>
+      </div>
+      <p class="report-reason">Reason: ${esc(report.reason)}</p>
+      <div class="post-body muted">Post by @${esc(report.post_author)}: ${esc(bodyPreview.slice(0, 300))}${bodyPreview.length > 300 ? '…' : ''}</div>
+      <div class="feed-tags"><a href="#/thread/${Number(report.thread_id)}">Thread: ${esc(report.thread_title)}</a></div>
+      ${
+        report.status === 'open'
+          ? `
+            <div class="admin-controls">
+              <button class="btn small" data-admin-report="${report.id}" data-admin-action="resolve">Resolve</button>
+              <button class="btn ghost small" data-admin-report="${report.id}" data-admin-action="dismiss">Dismiss</button>
+            </div>
+          `
+          : ''
+      }
+    </article>
+  `;
+}
+
+function userRowHtml(user) {
+  return `
+    <article class="admin-row">
+      <div class="admin-row-head">
+        ${avatarHtml(user.username, 'small', '')}
+        <span class="feed-name">${esc(user.display_name || user.username)}</span>
+        <span class="muted">@${esc(user.username)}</span>
+        ${user.is_admin ? '<span class="chip green">admin</span>' : ''}
+        ${user.is_moderator ? '<span class="chip">moderator</span>' : ''}
+        ${user.banned ? `<span class="chip danger">banned: ${esc(user.ban_reason || '—')}</span>` : ''}
+      </div>
+      <div class="feed-tags">
+        <span class="muted">id ${user.id} · ${user.thread_count} threads · ${user.post_count} posts · since ${time(user.created_at)}</span>
+      </div>
+      <div class="admin-controls">
+        ${user.banned
+          ? `<button class="btn small" data-admin-user="${user.id}" data-admin-action="unban">Unban</button>`
+          : `<button class="btn danger small" data-admin-user-ban="${user.id}">Ban</button>`}
+        ${user.is_moderator
+          ? `<button class="btn ghost small" data-admin-user="${user.id}" data-admin-action="mod_demote">Demote moderator</button>`
+          : `<button class="btn ghost small" data-admin-user="${user.id}" data-admin-action="mod_promote">Make moderator</button>`}
+        <a class="btn ghost small" href="#/user/${encodeURIComponent(user.username)}">View profile</a>
+      </div>
+    </article>
+  `;
+}
+
+function auditRowHtml(log) {
+  return `
+    <article class="admin-row">
+      <div class="admin-row-head">
+        <span class="chip">${esc(log.action)}</span>
+        <span class="muted">${log.username ? '@' + esc(log.username) : 'system'}</span>
+        <span class="muted">${esc(log.ip || '')}</span>
+        <span class="muted">· ${time(log.created_at)}</span>
+      </div>
+      ${log.details ? `<div class="feed-tags muted">${esc(log.details)}</div>` : ''}
+    </article>
+  `;
+}
+
+function appealRowHtml(a) {
+  return `
+    <article class="admin-row">
+      <div class="admin-row-head">
+        <span class="chip ${a.status === 'pending' ? 'warn' : a.status === 'approved' ? 'green' : 'danger'}">${esc(a.status)}</span>
+        <span class="feed-name">@${esc(a.username)}</span>
+        <span class="muted">· ${time(a.created_at)}</span>
+      </div>
+      <div class="post-body">${esc(a.reason)}</div>
+      ${a.status === 'pending' ? `
+        <div class="admin-controls">
+          <button class="btn small" data-appeal-approve="${a.id}">Approve (unban)</button>
+          <button class="btn ghost small" data-appeal-reject="${a.id}">Reject</button>
+          <a class="btn ghost small" href="#/user/${encodeURIComponent(a.username)}">Profile</a>
+        </div>
+      ` : `<div class="muted">Resolved ${a.resolved_at ? time(a.resolved_at) : ''}</div>`}
+    </article>
+  `;
+}
+
+function badgeRowHtml(b) {
+  return `
+    <article class="admin-row">
+      <div class="admin-row-head">
+        <span class="badge-chip" style="color:${esc(b.color)};border-color:${esc(b.color)}40">${esc(b.icon)} ${esc(b.label)}</span>
+        <span class="muted">${esc(b.name)}</span>
+        <span class="muted">· ${time(b.created_at)}</span>
+      </div>
+      <div class="admin-controls">
+        <button class="btn danger small" data-badge-delete="${b.id}">Delete badge</button>
+      </div>
+    </article>
+  `;
+}
+
+async function exportBackup() {
+  try {
+    const data = await api('/api/admin?type=export');
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `penthub-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('Export ready');
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+function renderAdmin(query) {
+  return async function adminView() {
+    if (!isStaff()) {
+      app.innerHTML = '<section class="card narrow"><h1>403</h1><p class="error">Staff only.</p></section>';
+      return;
+    }
+
+    const tab = ['reports', 'users', 'audit', 'appeals', 'badges', 'changelog'].includes(query.get('tab'))
+      ? query.get('tab')
+      : 'reports';
+
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+    const status = query.get('status') || 'open';
+
+    if (['users', 'audit', 'appeals', 'badges', 'changelog'].includes(tab) && !state.me.isAdmin) {
+      app.innerHTML = '<section class="card narrow"><h1>403</h1><p class="error">This section is admin-only.</p></section>';
+      return;
+    }
+
+    let content = '';
+
+    if (tab === 'reports') {
+      const data = await api(`/api/admin?type=reports&page=${page}&status=${encodeURIComponent(status)}`);
+      const reports = data.reports || [];
+      content = `
+        <div class="admin-controls">
+          <a class="btn ghost small" href="#/admin?tab=reports&status=open">Open</a>
+          <a class="btn ghost small" href="#/admin?tab=reports&status=all">All</a>
+        </div>
+      `;
+      content += reports.length ? reports.map(reportRowHtml).join('') : '<section class="empty">No reports.</section>';
+      content += paginationHtml(`#/admin?tab=reports&status=${encodeURIComponent(status)}`, page, data.hasMore);
+    } else if (tab === 'users') {
+      const q = query.get('q') || '';
+      const data = await api(`/api/admin?type=users&page=${page}&q=${encodeURIComponent(q)}`);
+      const users = data.users || [];
+      content = `
+        <form id="admin-user-search" class="form">
+          <input id="admin-user-q" class="input" placeholder="Search username" value="${esc(q)}" maxlength="32" />
+        </form>
+      `;
+      content += users.length ? users.map(userRowHtml).join('') : '<section class="empty">Nobody found.</section>';
+      content += paginationHtml(`#/admin?tab=users&q=${encodeURIComponent(q)}`, page, data.hasMore);
+    } else if (tab === 'audit') {
+      const data = await api(`/api/admin?type=audit&page=${page}`);
+      const logs = data.logs || [];
+      content = logs.length ? logs.map(auditRowHtml).join('') : '<section class="empty">Log is empty.</section>';
+      content += paginationHtml('#/admin?tab=audit', page, data.hasMore);
+    } else if (tab === 'appeals') {
+      const data = await api(`/api/admin?type=appeals&page=${page}`);
+      const appeals = data.appeals || [];
+      content = appeals.length ? appeals.map(appealRowHtml).join('') : '<section class="empty">No appeals.</section>';
+      content += paginationHtml('#/admin?tab=appeals', page, data.hasMore);
+    } else if (tab === 'badges') {
+      const data = await api('/api/badges');
+      const badges = data.badges || [];
+      content = `
+        <details class="card" style="margin-bottom:14px">
+          <summary>Create badge</summary>
+          <form id="badge-create" class="form" style="margin-top:10px">
+            <label>Name (slug) <input id="b-name" class="input" required minlength="2" maxlength="24" placeholder="founder" /></label>
+            <label>Label <input id="b-label" class="input" required maxlength="24" placeholder="Founder" /></label>
+            <label>Icon (1-2 chars) <input id="b-icon" class="input" maxlength="2" value="★" /></label>
+            <label>Color
+              <select id="b-color">
+                <option value="#58a6ff">Blue</option>
+                <option value="#3fb950">Green</option>
+                <option value="#d29922">Amber</option>
+                <option value="#f85149">Red</option>
+                <option value="#a371f7">Purple</option>
+                <option value="#f778ba">Pink</option>
+              </select>
+            </label>
+            <button class="btn" type="submit">Create</button>
+          </form>
+        </details>
+
+        <details class="card" style="margin-bottom:14px">
+          <summary>Assign / revoke badge</summary>
+          <form id="badge-assign-form" class="form" style="margin-top:10px">
+            <label>Username <input id="ba-username" class="input" required minlength="3" maxlength="32" /></label>
+            <label>Badge
+              <select id="ba-badge">
+                ${badges.map((b) => `<option value="${b.id}">${esc(b.icon)} ${esc(b.label)} (${esc(b.name)})</option>`).join('')}
+              </select>
+            </label>
+            <div class="admin-controls">
+              <button class="btn small" type="button" id="ba-assign">Assign</button>
+              <button class="btn danger small" type="button" id="ba-revoke">Revoke</button>
+            </div>
+          </form>
+        </details>
+
+        ${badges.length ? badges.map(badgeRowHtml).join('') : '<section class="empty">No badges.</section>'}
+      `;
+    } else if (tab === 'changelog') {
+      const data = await api(`/api/changelog?page=${page}`);
+      const items = data.items || [];
+      content = `
+        <button class="btn small" id="changelog-new-admin" style="margin-bottom:14px">+ New changelog entry</button>
+      `;
+      content += items.length
+        ? items.map((c) => `
+            <article class="admin-row">
+              <div class="admin-row-head">
+                <span class="chip green">${esc(c.version)}</span>
+                <span class="feed-name">${esc(c.title)}</span>
+                <span class="muted">· ${time(c.created_at)}</span>
+              </div>
+              <div class="post-body">${mdToHtml(c.body.slice(0, 300))}</div>
+            </article>
+          `).join('')
+        : '<section class="empty">No changelog yet.</section>';
+      content += paginationHtml('#/admin?tab=changelog', page, data.hasMore);
+    }
+
+    app.innerHTML = `
+      <section class="page-head">
+        <h1>Admin</h1>
+        ${state.me.isAdmin ? '<button id="export-btn" class="btn ghost small">Download backup (JSON)</button>' : ''}
+      </section>
+
+      <nav class="tabs">
+        <a class="tab ${tab === 'reports' ? 'active' : ''}" href="#/admin?tab=reports">Reports</a>
+        ${state.me.isAdmin ? `<a class="tab ${tab === 'users' ? 'active' : ''}" href="#/admin?tab=users">Users</a>` : ''}
+        ${state.me.isAdmin ? `<a class="tab ${tab === 'appeals' ? 'active' : ''}" href="#/admin?tab=appeals">Appeals</a>` : ''}
+        ${state.me.isAdmin ? `<a class="tab ${tab === 'badges' ? 'active' : ''}" href="#/admin?tab=badges">Badges</a>` : ''}
+        ${state.me.isAdmin ? `<a class="tab ${tab === 'changelog' ? 'active' : ''}" href="#/admin?tab=changelog">Changelog</a>` : ''}
+        ${state.me.isAdmin ? `<a class="tab ${tab === 'audit' ? 'active' : ''}" href="#/admin?tab=audit">Audit log</a>` : ''}
+      </nav>
+
+      ${content}
+    `;
+
+    bindAdminPage(tab);
+  };
+}
+
+function bindAdminPage(tab) {
+  document.querySelectorAll('[data-admin-report]').forEach((button) => {
+    button.addEventListener('click', () => adminAction('report', Number(button.dataset.adminReport), button.dataset.adminAction));
+  });
+
+  document.querySelectorAll('[data-admin-user]').forEach((button) => {
+    button.addEventListener('click', () => adminAction('user', Number(button.dataset.adminUser), button.dataset.adminAction));
+  });
+
+  document.querySelectorAll('[data-admin-user-ban]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const reason = prompt('Ban reason (shown to the user):');
+      if (!reason) return;
+      adminAction('user', Number(button.dataset.adminUserBan), 'ban', { reason });
+    });
+  });
+
+  document.querySelectorAll('[data-appeal-approve]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        await api('/api/appeals', { method: 'POST', body: JSON.stringify({ action: 'approve', id: Number(button.dataset.appealApprove) }) });
+        toast('Appeal approved, user unbanned');
+        await render();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-appeal-reject]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        await api('/api/appeals', { method: 'POST', body: JSON.stringify({ action: 'reject', id: Number(button.dataset.appealReject) }) });
+        toast('Appeal rejected');
+        await render();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-badge-delete]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (!confirm('Delete this badge? It will be revoked from everyone.')) return;
+      try {
+        await api('/api/badges', { method: 'POST', body: JSON.stringify({ action: 'delete', id: Number(button.dataset.badgeDelete) }) });
+        toast('Badge deleted');
+        await render();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  });
+
+  const searchForm = document.getElementById('admin-user-search');
+
+  if (searchForm) {
+    searchForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const q = document.getElementById('admin-user-q').value.trim();
+      location.hash = `#/admin?tab=users&q=${encodeURIComponent(q)}`;
+    });
+  }
+
+  document.getElementById('export-btn')?.addEventListener('click', exportBackup);
+
+  const badgeCreate = document.getElementById('badge-create');
+
+  if (badgeCreate) {
+    badgeCreate.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try {
+        await api('/api/badges', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'create',
+            name: document.getElementById('b-name').value,
+            label: document.getElementById('b-label').value,
+            icon: document.getElementById('b-icon').value,
+            color: document.getElementById('b-color').value
+          })
+        });
+        toast('Badge created');
+        await render();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  }
+
+  const baAssign = document.getElementById('ba-assign');
+  const baRevoke = document.getElementById('ba-revoke');
+
+  async function assignOrRevoke(action) {
+    try {
+      const username = document.getElementById('ba-username').value.trim();
+      const badgeId = Number(document.getElementById('ba-badge').value);
+
+      const profile = await api(`/api/profile?username=${encodeURIComponent(username)}`);
+
+      await api('/api/badges', {
+        method: 'POST',
+        body: JSON.stringify({ action, userId: profile.profile.user.id, badgeId })
+      });
+
+      toast(action === 'assign' ? 'Badge assigned' : 'Badge revoked');
+      await render();
+    } catch (error) {
+      toast(error.message, true);
+    }
+  }
+
+  if (baAssign) baAssign.addEventListener('click', () => assignOrRevoke('assign'));
+  if (baRevoke) baRevoke.addEventListener('click', () => assignOrRevoke('revoke'));
+
+  const changelogNew = document.getElementById('changelog-new-admin');
+
+  if (changelogNew) {
+    changelogNew.addEventListener('click', () => {
+      const version = prompt('Version (e.g. 1.1.0):');
+      if (!version) return;
+      const title = prompt('Title:');
+      if (!title) return;
+      const body = prompt('Body (markdown):');
+      if (!body) return;
+
+      api('/api/changelog', { method: 'POST', body: JSON.stringify({ version, title, body }) })
+        .then(() => { toast('Published'); render(); })
+        .catch((err) => toast(err.message, true));
+    });
+  }
+}
