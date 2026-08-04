@@ -212,7 +212,7 @@ export function setCookie(name, value, maxAgeSec) {
 }
 
 export function clearCookie(name) {
-  return `${name}==; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+  return `${name}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 }
 
 export async function createSession(env, userId, ip) {
@@ -290,6 +290,46 @@ export async function deleteSession(env, request) {
   }
 
   return clearCookie(COOKIE_NAME);
+}
+
+export async function verifyTurnstile(env, request, token) {
+  const secret = env.TURNSTILE_SECRET;
+
+  if (!secret) return true;
+
+  if (!token || typeof token !== 'string' || token.length < 8 || token.length > 4096) {
+    return false;
+  }
+
+  try {
+    const res = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        secret,
+        response: token,
+        remoteip: getClientIp(request)
+      })
+    });
+
+    if (!res.ok) return false;
+
+    const data = await res.json();
+    return data && data.success === true;
+  } catch {
+    return false;
+  }
+}
+
+export function generateRecoveryCode() {
+  const hex = randomHex(16).toUpperCase();
+
+  return `PH-${hex.slice(0, 4)}-${hex.slice(4, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}`;
+}
+
+export function normalizeRecoveryCode(code) {
+  if (typeof code !== 'string') return '';
+  return code.toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
 export async function rateLimit(env, rawKey, limit, windowSec) {
