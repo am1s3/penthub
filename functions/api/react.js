@@ -1,24 +1,12 @@
-import {
-  json,
-  readJson,
-  checkOrigin,
-  getSessionUser,
-  rateLimit
-} from '../_utils.js';
+import { json, readJson, checkOrigin, getSessionUser, rateLimit } from '../_utils.js';
 
-export const REACTION_EMOJIS = ['👍', '', '', '', '❤️', '️'];
+export const REACTION_EMOJIS = ['👍', '', '', '😂', '❤️', '🛡️'];
 
 export async function onRequest({ request, env }) {
-  if (request.method !== 'POST') {
-    return json({ error: 'Method not allowed' }, 405);
-  }
-
-  if (!checkOrigin(request)) {
-    return json({ error: 'Bad origin' }, 403);
-  }
+  if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
+  if (!checkOrigin(request)) return json({ error: 'Bad origin' }, 403);
 
   const user = await getSessionUser(env, request);
-
   if (!user) return json({ error: 'Login required' }, 401);
 
   if (!(await rateLimit(env, `react:user:${user.id}`, 120, 3600))) {
@@ -26,38 +14,22 @@ export async function onRequest({ request, env }) {
   }
 
   let body;
-
-  try {
-    body = await readJson(request);
-  } catch {
-    return json({ error: 'Invalid JSON' }, 400);
-  }
+  try { body = await readJson(request); } catch { return json({ error: 'Invalid JSON' }, 400); }
 
   const postId = Number.parseInt(body.postId, 10);
   const emoji = typeof body.emoji === 'string' ? body.emoji : '';
 
-  if (!Number.isInteger(postId)) {
-    return json({ error: 'Invalid postId' }, 400);
-  }
-
-  if (!REACTION_EMOJIS.includes(emoji)) {
-    return json({ error: 'Unsupported emoji' }, 400);
-  }
+  if (!Number.isInteger(postId)) return json({ error: 'Invalid postId' }, 400);
+  if (!REACTION_EMOJIS.includes(emoji)) return json({ error: 'Unsupported emoji' }, 400);
 
   try {
     const post = await env.DB.prepare('SELECT id, user_id, thread_id, deleted FROM posts WHERE id = ? LIMIT 1')
-      .bind(postId)
-      .first();
+      .bind(postId).first();
 
-    if (!post || post.deleted) {
-      return json({ error: 'Post not found' }, 404);
-    }
+    if (!post || post.deleted) return json({ error: 'Post not found' }, 404);
 
-    const existing = await env.DB.prepare(
-      'SELECT id, emoji FROM reactions WHERE post_id = ? AND user_id = ? LIMIT 1'
-    )
-      .bind(postId, user.id)
-      .first();
+    const existing = await env.DB.prepare('SELECT id, emoji FROM reactions WHERE post_id = ? AND user_id = ? LIMIT 1')
+      .bind(postId, user.id).first();
 
     let removed = false;
 
@@ -66,25 +38,19 @@ export async function onRequest({ request, env }) {
       removed = true;
     } else if (existing) {
       await env.DB.prepare('UPDATE reactions SET emoji = ?, created_at = ? WHERE id = ?')
-        .bind(emoji, Date.now(), existing.id)
-        .run();
+        .bind(emoji, Date.now(), existing.id).run();
     } else {
-      await env.DB.prepare(
-        'INSERT INTO reactions (post_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?)'
-      )
-        .bind(postId, user.id, emoji, Date.now())
-        .run();
+      await env.DB.prepare('INSERT INTO reactions (post_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?)')
+        .bind(postId, user.id, emoji, Date.now()).run();
     }
 
     if (!removed && post.user_id !== user.id) {
-      try {
+      const pref = await env.DB.prepare('SELECT notify_reaction FROM users WHERE id = ?').bind(post.user_id).first();
+
+      if (!pref || pref.notify_reaction !== 0) {
         await env.DB.prepare(
           'INSERT INTO notifications (user_id, actor_id, type, post_id, thread_id, created_at, read_at) VALUES (?, ?, ?, ?, ?, ?, NULL)'
-        )
-          .bind(post.user_id, user.id, 'reaction', postId, post.thread_id, Date.now())
-          .run();
-      } catch {
-        // ignore
+        ).bind(post.user_id, user.id, 'reaction', postId, post.thread_id, Date.now()).run().catch(() => {});
       }
     }
 
