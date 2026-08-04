@@ -6,7 +6,3 @@ pages_build_output_dir = "public"
 binding = "DB"
 database_name = "penthub-db"
 database_id = "e17cc130-1204-4db7-be06-a9f82c9d4377"
-
-[[r2_buckets]]
-binding = "FILES"
-bucket_name = "penthub-files"
