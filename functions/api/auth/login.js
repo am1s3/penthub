@@ -8,7 +8,8 @@ import {
   hashPassword,
   randomHex,
   audit,
-  createSession
+  createSession,
+  verifyTurnstile
 } from '../../_utils.js';
 
 export async function onRequest({ request, env }) {
@@ -36,6 +37,10 @@ export async function onRequest({ request, env }) {
     return json({ error: 'Слишком много попыток входа. Попробуй позже.' }, 429);
   }
 
+  if (!(await verifyTurnstile(env, request, body.turnstileToken))) {
+    return json({ error: 'Проверка не пройдена. Обнови страницу и попробуй снова.' }, 400);
+  }
+
   try {
     const user = await env.DB.prepare(
       'SELECT id, username, password_hash, salt, banned FROM users WHERE username = ? COLLATE NOCASE'
@@ -44,7 +49,6 @@ export async function onRequest({ request, env }) {
       .first();
 
     if (!user) {
-      // Немного ровняем тайминг, чтобы не показывать существование аккаунта.
       await hashPassword(password || 'invalid-password', randomHex(16));
 
       return json({ error: 'Неверный логин или пароль' }, 401);
