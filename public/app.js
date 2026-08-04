@@ -4442,3 +4442,120 @@ function renderSettings(query) {
     });
   };
 }
+// === PART 6: hero layouts without inline styles ===
+
+function renderHome() {
+  return async function homeView() {
+    if (!state.me) {
+      await renderWelcome()();
+      return;
+    }
+
+    const [p1, p2, rel] = await Promise.all([
+      api('/api/threads?page=1'),
+      api('/api/threads?page=2').catch(() => ({ threads: [] })),
+      api('/api/releases').catch(() => ({ releases: [] }))
+    ]);
+
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const topWeek = [...(p1.threads || []), ...(p2.threads || [])]
+      .filter((t) => t.updated_at > weekAgo)
+      .sort((a, b) => Number(b.post_count || 0) - Number(a.post_count || 0))
+      .slice(0, 5);
+
+    const releases = (rel.releases || []).slice(0, 4);
+
+    app.innerHTML = `
+      <section class="welcome-hero">
+        <div class="hero-avatar-row">${avatarHtml(state.me.username, '', state.me.avatar || '')}</div>
+        <h1>Hey, ${esc(state.me.display_name || state.me.username)}</h1>
+        <p>Your security community dashboard.</p>
+        <div class="hero-actions">
+          <a class="btn" href="#/new-thread">+ New thread</a>
+          <a class="btn ghost" href="#/forum">Open forum</a>
+        </div>
+      </section>
+
+      <section class="page-head"><h2>Top threads this week</h2></section>
+      ${topWeek.length ? topWeek.map(threadRowHtml).join('') : '<section class="empty">No activity this week yet.</section>'}
+
+      <section class="page-head" style="margin-top:20px"><h2>Popular projects</h2></section>
+      <div class="feature-grid">
+        ${releases.map((r) => `
+          <a class="feature-card" href="${esc(r.url)}" target="_blank" rel="noopener">
+            <h3>${esc(r.source)} ${esc(r.tag)}</h3>
+            <p>${esc((r.title || '').slice(0, 80))}</p>
+          </a>
+        `).join('') || `
+          <a class="feature-card" href="#/firmware"><h3>Firmware Hub</h3><p>Releases appear once the sync cron runs.</p></a>
+        `}
+        <a class="feature-card" href="#/firmware/bruce/wiki"><h3>Bruce wiki index</h3><p>Curated summaries with links to the official wiki.</p></a>
+      </div>
+
+      <section class="page-head" style="margin-top:20px"><h2>Useful links</h2></section>
+      <div class="feature-grid">
+        <a class="feature-card" href="#/learn"><h3>Learn</h3><p>Original training articles: labs, CTF path, UART/JTAG, disclosure.</p></a>
+        <a class="feature-card" href="#/rules"><h3>Rules</h3><p>What is allowed and what gets you banned.</p></a>
+        <a class="feature-card" href="#/support"><h3>Support</h3><p>Tickets for account issues and questions.</p></a>
+        <a class="feature-card" href="/api/rss"><h3>RSS</h3><p>Follow new threads in your reader.</p></a>
+      </div>
+    `;
+
+    attachShareHandlers(app);
+  };
+}
+
+function renderWelcome() {
+  return async function welcomeView() {
+    if (state.me) { location.hash = '#/'; return; }
+
+    const totalThreads = state.categories.reduce((a, c) => a + Number(c.thread_count || 0), 0);
+
+    app.innerHTML = `
+      <section class="welcome-hero">
+        <img class="welcome-logo" src="/logo.svg" alt="PentHub logo" />
+        <h1>The home of legal hardware hacking</h1>
+        <p>
+          PentHub is a community for <strong>authorized</strong> security research:
+          ESP32 & Flipper Zero labs, CTF training, defensive security and firmware deep-dives.
+        </p>
+        <p class="muted">${state.categories.length} categories · ${totalThreads} threads · original training articles · auto-synced firmware releases</p>
+        <div class="hero-actions">
+          <a class="btn" href="#/register">Create account</a>
+          <a class="btn blue" href="#/login">Log in</a>
+          <a class="btn ghost" href="#/forum">Browse forum</a>
+        </div>
+      </section>
+
+      <section class="feature-grid">
+        <a class="feature-card" href="#/learn">
+          <h3>Learn by doing</h3>
+          <p>Home Wi-Fi labs, CTF path, UART/JTAG basics, responsible disclosure — original articles.</p>
+        </a>
+        <a class="feature-card" href="#/firmware">
+          <h3>Firmware Hub</h3>
+          <p>Bruce & friends: releases auto-synced from GitHub with discussion threads.</p>
+        </a>
+        <a class="feature-card" href="#/categories">
+          <h3>Pick your lane</h3>
+          <p>Firmwares, Hardwares, Networks, Research, Training — find your community.</p>
+        </a>
+        <a class="feature-card" href="#/rules">
+          <h3>Safe by design</h3>
+          <p>Authorized research only. Reports, appeals, audits and transparent moderation.</p>
+        </a>
+      </section>
+
+      <section class="card" style="text-align:center">
+        <h2 style="margin-top:0">Why people join</h2>
+        <p class="muted">
+          “Finally a place where ESP32 tinkerers, CTF players and professional pentesters
+          talk shop without stepping over the legal line.”
+        </p>
+        <div class="hero-actions">
+          <a class="btn" href="#/register">Join PentHub — it's free</a>
+        </div>
+      </section>
+    `;
+  };
+}
