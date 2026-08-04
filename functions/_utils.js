@@ -181,13 +181,25 @@ export async function readJson(request, maxBytes = 16384) {
 }
 
 export function parseCookies(header) {
-  if (!header) return {};
+  const out = {};
 
-  return header.split(';').reduce((acc, part) => {
-    const [key, ...rest] = part.trim().split('=');
-    acc[key] = decodeURIComponent(rest.join('='));
-    return acc;
-  }, {});
+  if (!header) return out;
+
+  for (const part of header.split(';')) {
+    const idx = part.indexOf('=');
+    if (idx < 1) continue;
+
+    const key = part.slice(0, idx).trim();
+    const val = part.slice(idx + 1).trim();
+
+    try {
+      out[key] = decodeURIComponent(val);
+    } catch {
+      out[key] = val;
+    }
+  }
+
+  return out;
 }
 
 export function getCookie(request, name) {
@@ -200,7 +212,7 @@ export function setCookie(name, value, maxAgeSec) {
 }
 
 export function clearCookie(name) {
-  return `${name}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
+  return `${name}==; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`;
 }
 
 export async function createSession(env, userId, ip) {
@@ -233,6 +245,7 @@ export async function getSessionUser(env, request) {
         u.id AS user_id,
         u.username,
         u.is_admin,
+        u.is_moderator,
         u.banned
       FROM sessions s
       JOIN users u ON u.id = s.user_id
@@ -256,8 +269,13 @@ export async function getSessionUser(env, request) {
   return {
     id: row.user_id,
     username: row.username,
-    isAdmin: Boolean(row.is_admin)
+    isAdmin: Boolean(row.is_admin),
+    isModerator: Boolean(row.is_moderator)
   };
+}
+
+export function isStaff(user) {
+  return Boolean(user && (user.isAdmin || user.isModerator));
 }
 
 export async function deleteSession(env, request) {
@@ -310,8 +328,6 @@ export async function rateLimit(env, rawKey, limit, windowSec) {
 
     return true;
   } catch {
-    // Для MVP лучше не класть весь сайт из-за rate-limit таблицы.
-    // В продакшене замени на Durable Objects / Cloudflare Rate Limiting.
     return true;
   }
 }
@@ -327,6 +343,6 @@ export async function audit(env, { userId = null, action, request = null, detail
       .bind(userId, action, ip, safeDetails, Date.now())
       .run();
   } catch {
-    // Аудит не должен ронять основной запрос.
+    // аудит не роняет основной запрос
   }
 }
