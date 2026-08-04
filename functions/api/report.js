@@ -48,13 +48,27 @@ export async function onRequest({ request, env }) {
 
   try {
     const post = await env.DB.prepare(
-      'SELECT id, deleted FROM posts WHERE id = ? LIMIT 1'
+      'SELECT id, user_id, deleted FROM posts WHERE id = ? LIMIT 1'
     )
       .bind(postId)
       .first();
 
     if (!post || post.deleted) {
       return json({ error: 'Пост не найден' }, 404);
+    }
+
+    if (post.user_id === user.id) {
+      return json({ error: 'Нельзя жаловаться на свой собственный пост' }, 400);
+    }
+
+    const duplicate = await env.DB.prepare(
+      "SELECT id FROM reports WHERE post_id = ? AND reporter_id = ? AND status = 'open' LIMIT 1"
+    )
+      .bind(postId, user.id)
+      .first();
+
+    if (duplicate) {
+      return json({ error: 'Жалоба на этот пост уже на рассмотрении' }, 409);
     }
 
     await env.DB.prepare(
