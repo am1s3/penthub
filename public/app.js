@@ -3,6 +3,8 @@ const authArea = document.getElementById('auth-area');
 const modal = document.getElementById('modal');
 const recoveryModal = document.getElementById('recovery-modal');
 
+const REACTION_EMOJIS = ['👍', '', '', '😂', '❤️', '🛡️'];
+
 const state = {
   me: null,
   categories: [],
@@ -139,7 +141,7 @@ function mdToHtml(src) {
 }
 
 function time(timestamp) {
-  return new Date(timestamp).toLocaleString('ru-RU', {
+  return new Date(timestamp).toLocaleString('en-US', {
     dateStyle: 'medium',
     timeStyle: 'short'
   });
@@ -266,24 +268,31 @@ function closeRecoveryModal() {
   recoveryModal.classList.add('hidden');
 }
 
+function userLink(username) {
+  return `<a href="#/user/${encodeURIComponent(username)}">@${esc(username)}</a>`;
+}
+
 function updateAuthArea() {
   if (!authArea) return;
 
   if (state.me) {
+    const unread = Number(state.me.unread_count || 0);
+
     authArea.innerHTML = `
-      <a class="btn small" href="#/new-thread">+ Тема</a>
-      ${isStaff() ? '<a class="btn ghost small" href="#/admin">Админка</a>' : ''}
-      <span class="muted">@${esc(state.me.username)}</span>
+      <a class="btn small" href="#/new-thread">+ Thread</a>
+      <a class="btn ghost small" href="#/messages">PM${unread ? ` (${unread})` : ''}</a>
+      ${isStaff() ? '<a class="btn ghost small" href="#/admin">Admin</a>' : ''}
+      <a class="muted" href="#/user/${encodeURIComponent(state.me.username)}">@${esc(state.me.username)}</a>
       ${state.me.isAdmin ? '<span class="badge admin">admin</span>' : ''}
       ${state.me.isModerator ? '<span class="badge">moderator</span>' : ''}
-      <button id="logout-btn" class="btn ghost small" type="button">Выход</button>
+      <button id="logout-btn" class="btn ghost small" type="button">Logout</button>
     `;
 
     document.getElementById('logout-btn')?.addEventListener('click', logout);
   } else {
     authArea.innerHTML = `
-      <a class="btn ghost small" href="#/login">Вход</a>
-      <a class="btn small" href="#/register">Регистрация</a>
+      <a class="btn ghost small" href="#/login">Log in</a>
+      <a class="btn small" href="#/register">Register</a>
     `;
   }
 }
@@ -318,9 +327,9 @@ function paginationHtml(base, page, hasMore) {
 
   return `
     <nav class="pagination">
-      ${page > 1 ? `<a class="btn ghost small" href="${pageLink(base, page - 1)}">Назад</a>` : ''}
-      <span class="muted">Страница ${page}</span>
-      ${hasMore ? `<a class="btn ghost small" href="${pageLink(base, page + 1)}">Дальше</a>` : ''}
+      ${page > 1 ? `<a class="btn ghost small" href="${pageLink(base, page - 1)}">Back</a>` : ''}
+      <span class="muted">Page ${page}</span>
+      ${hasMore ? `<a class="btn ghost small" href="${pageLink(base, page + 1)}">Next</a>` : ''}
     </nav>
   `;
 }
@@ -330,7 +339,7 @@ function categoryCardHtml(category) {
     <a class="category-card" href="#/category/${encodeURIComponent(category.slug)}">
       <h3>${esc(category.name)}</h3>
       <p>${esc(category.description)}</p>
-      <div class="meta">Тредов: ${Number(category.thread_count || 0)}</div>
+      <div class="meta">Threads: ${Number(category.thread_count || 0)}</div>
     </a>
   `;
 }
@@ -345,9 +354,9 @@ function threadItemHtml(thread) {
       </h3>
       <div class="meta">
         <span>${esc(thread.category_name || '')}</span>
-        <span>автор: ${esc(thread.author || 'unknown')}</span>
-        <span>ответов: ${Number(thread.post_count || 0)}</span>
-        <span>обновлено: ${time(thread.updated_at)}</span>
+        <span>by ${userLink(thread.author || 'unknown')}</span>
+        <span>replies: ${Number(thread.post_count || 0)}</span>
+        <span>updated: ${time(thread.updated_at)}</span>
       </div>
     </a>
   `;
@@ -361,21 +370,21 @@ function renderHome() {
       <section class="hero">
         <h1>PentHub</h1>
         <p>
-          Форум для легального пентеста, hardware security lab, CTF, ESP32, Flipper Zero
-          и defensive security.
+          A forum for legal pentesting, hardware security labs, CTF, ESP32, Flipper Zero
+          and defensive security.
         </p>
         <p>
-          Только авторизованные тесты, собственные устройства, собственные сети
-          и письменные разрешения. Любые незаконные действия запрещены.
+          Authorized tests only: your own devices, your own networks, written permission.
+          Any illegal activity is prohibited.
         </p>
         <p>
-          <a href="#/rules">Прочитать правила</a>
+          <a href="#/rules">Read the rules</a>
         </p>
       </section>
 
       <section class="section-head">
-        <h2>Категории</h2>
-        ${state.me ? '<a class="btn" href="#/new-thread">Создать тред</a>' : ''}
+        <h2>Categories</h2>
+        ${state.me ? '<a class="btn" href="#/new-thread">New thread</a>' : ''}
       </section>
 
       <section class="grid">
@@ -393,7 +402,7 @@ function renderCategory(slug, query) {
     const category = categories.find((item) => item.slug === slug);
 
     if (!category) {
-      throw new Error('Категория не найдена');
+      throw new Error('Category not found');
     }
 
     const page = Math.max(1, Number(query.get('page') || 1) || 1);
@@ -407,13 +416,13 @@ function renderCategory(slug, query) {
           <h1>${esc(category.name)}</h1>
           <p class="muted">${esc(category.description)}</p>
         </div>
-        ${state.me ? `<a class="btn" href="#/new-thread?category=${encodeURIComponent(slug)}">Новый тред</a>` : ''}
+        ${state.me ? `<a class="btn" href="#/new-thread?category=${encodeURIComponent(slug)}">New thread</a>` : ''}
       </section>
 
       ${
         threads.length
           ? `<section class="thread-list">${threads.map(threadItemHtml).join('')}</section>`
-          : '<section class="empty">Пока нет тредов. Создай первый в рамках правил.</section>'
+          : '<section class="empty">No threads yet. Create the first one within the rules.</section>'
       }
 
       ${paginationHtml(base, page, Boolean(data.hasMore))}
@@ -427,15 +436,15 @@ function threadAdminHtml(thread) {
   return `
     <div class="admin-controls">
       <button class="btn ghost small" data-admin-thread="${thread.id}" data-admin-action="${thread.is_locked ? 'unlock' : 'lock'}">
-        ${thread.is_locked ? 'Разблокировать' : 'Заблокировать'}
+        ${thread.is_locked ? 'Unlock' : 'Lock'}
       </button>
 
       <button class="btn ghost small" data-admin-thread="${thread.id}" data-admin-action="${thread.is_pinned ? 'unpin' : 'pin'}">
-        ${thread.is_pinned ? 'Открепить' : 'Закрепить'}
+        ${thread.is_pinned ? 'Unpin' : 'Pin'}
       </button>
 
       <button class="btn danger small" data-admin-thread="${thread.id}" data-admin-action="delete">
-        Удалить тред
+        Delete thread
       </button>
     </div>
   `;
@@ -443,25 +452,51 @@ function threadAdminHtml(thread) {
 
 function replyFormHtml(thread) {
   if (!state.me) {
-    return `<p class="notice"><a href="#/login">Войди</a>, чтобы отвечать.</p>`;
+    return `<p class="notice"><a href="#/login">Log in</a> to reply.</p>`;
   }
 
   if (thread.is_locked && !isStaff()) {
-    return `<p class="notice warn">Тред закрыт для ответов.</p>`;
+    return `<p class="notice warn">Thread is locked.</p>`;
   }
 
   return `
     <form id="reply-form" class="form">
       <label>
-        Ответ
+        Reply
         <textarea id="reply-body" maxlength="10000" required minlength="1"></textarea>
       </label>
       <p class="muted">
-        Markdown: **жирный**, *курсив*, \`код\`, \`\`\`блоки кода\`\`\`, списки (- и 1.), &gt; цитаты, [ссылка](https://example.com)
+        Markdown: **bold**, *italic*, \`code\`, \`\`\`code blocks\`\`\`, lists (- and 1.), &gt; quotes, [link](https://example.com), @mentions
       </p>
-      <button class="btn" type="submit">Ответить</button>
+      <button class="btn" type="submit">Reply</button>
       <div id="reply-error" class="form-error"></div>
     </form>
+  `;
+}
+
+function reactionsHtml(post) {
+  const counts = post.reactions || [];
+
+  const countButtons = counts
+    .map(
+      (r) => `
+        <button class="btn ghost small ${post.my_reaction === r.emoji ? 'tab active' : ''}" data-react-post="${post.id}" data-react-emoji="${r.emoji}">
+          ${r.emoji} ${r.count}
+        </button>
+      `
+    )
+    .join('');
+
+  return `
+    <div class="admin-controls">
+      ${countButtons}
+      <details class="react-picker">
+        <summary class="link">+ react</summary>
+        <div class="admin-controls">
+          ${REACTION_EMOJIS.map((e) => `<button class="btn small" data-react-post="${post.id}" data-react-emoji="${e}">${e}</button>`).join('')}
+        </div>
+      </details>
+    </div>
   `;
 }
 
@@ -469,34 +504,36 @@ function postFooterHtml(post) {
   const canEdit = state.me && (state.me.id === post.user_id || isStaff());
 
   const editButton = canEdit
-    ? `<button class="link" data-edit-post="${post.id}">Редактировать</button>`
+    ? `<button class="link" data-edit-post="${post.id}">Edit</button>`
     : '';
 
   const reportButton = state.me
-    ? `<button class="link" data-report-post="${post.id}">Пожаловаться</button>`
+    ? `<button class="link" data-report-post="${post.id}">Report</button>`
     : '';
 
   const adminDelete = isStaff()
-    ? `<button class="link danger" data-admin-post="${post.id}" data-admin-action="delete">Удалить</button>`
+    ? `<button class="link danger" data-admin-post="${post.id}" data-admin-action="delete">Delete</button>`
     : '';
 
   return [editButton, reportButton, adminDelete].filter(Boolean).join('');
 }
 
 function postHtml(thread, post) {
-  const edited = post.updated_at > post.created_at ? '<span class="edited">(изменено)</span>' : '';
+  const edited = post.updated_at > post.created_at ? '<span class="edited">(edited)</span>' : '';
 
   return `
     <article class="post" id="post-${post.id}">
       <header>
         <div class="post-author">
-          ${esc(post.username)}
+          ${userLink(post.username)}
           ${post.is_admin ? '<span class="badge admin">admin</span>' : ''}
         </div>
         <time>${time(post.created_at)} ${edited}</time>
       </header>
 
       <div class="post-body">${mdToHtml(post.body)}</div>
+
+      ${state.me ? reactionsHtml(post) : ''}
 
       <footer>
         ${postFooterHtml(post)}
@@ -510,7 +547,7 @@ function renderThread(id, query) {
     const threadId = Number(id);
 
     if (!Number.isInteger(threadId)) {
-      throw new Error('Некорректный тред');
+      throw new Error('Invalid thread');
     }
 
     const page = Math.max(1, Number(query.get('page') || 1) || 1);
@@ -529,8 +566,8 @@ function renderThread(id, query) {
           <h1>${esc(thread.title)}</h1>
           <div class="meta">
             <a href="#/category/${encodeURIComponent(thread.category_slug)}">${esc(thread.category_name)}</a>
-            <span>автор: ${esc(thread.author)}</span>
-            <span>создано: ${time(thread.created_at)}</span>
+            <span>by ${userLink(thread.author)}</span>
+            <span>created: ${time(thread.created_at)}</span>
           </div>
         </div>
       </section>
@@ -544,7 +581,7 @@ function renderThread(id, query) {
       ${paginationHtml(base, page, Boolean(postsData.hasMore))}
 
       <section class="page-card">
-        <h2>Ответ</h2>
+        <h2>Reply</h2>
         ${replyFormHtml(thread)}
       </section>
     `;
@@ -569,7 +606,7 @@ function bindThreadPage(thread, posts) {
           body: JSON.stringify({ threadId: thread.id, body })
         });
 
-        toast('Ответ опубликован');
+        toast('Reply published');
         await render();
       } catch (error) {
         errorEl.textContent = error.message;
@@ -587,6 +624,24 @@ function bindThreadPage(thread, posts) {
     button.addEventListener('click', () => {
       const post = posts.find((p) => p.id === Number(button.dataset.editPost));
       if (post) startEditPost(post);
+    });
+  });
+
+  document.querySelectorAll('[data-react-post]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        await api('/api/react', {
+          method: 'POST',
+          body: JSON.stringify({
+            postId: Number(button.dataset.reactPost),
+            emoji: button.dataset.reactEmoji
+          })
+        });
+
+        await render();
+      } catch (error) {
+        toast(error.message, true);
+      }
     });
   });
 
@@ -612,8 +667,8 @@ function startEditPost(post) {
   bodyEl.innerHTML = `
     <textarea id="edit-body-${post.id}" class="input edit-area" maxlength="10000">${esc(post.body)}</textarea>
     <div class="admin-controls">
-      <button class="btn small" data-edit-save="${post.id}">Сохранить</button>
-      <button class="btn ghost small" data-edit-cancel="${post.id}">Отмена</button>
+      <button class="btn small" data-edit-save="${post.id}">Save</button>
+      <button class="btn ghost small" data-edit-cancel="${post.id}">Cancel</button>
     </div>
     <div class="form-error" id="edit-error-${post.id}"></div>
   `;
@@ -628,7 +683,7 @@ function startEditPost(post) {
         body: JSON.stringify({ postId: post.id, body: newBody })
       });
 
-      toast('Пост обновлён');
+      toast('Post updated');
       await render();
     } catch (error) {
       errorEl.textContent = error.message;
@@ -647,11 +702,277 @@ async function adminAction(type, id, action) {
       body: JSON.stringify({ type, id, action })
     });
 
-    toast('Действие выполнено');
+    toast('Done');
     await render();
   } catch (error) {
     toast(error.message, true);
   }
+}
+
+function renderProfile(username) {
+  return async function profileView() {
+    const data = await api(`/api/profile?username=${encodeURIComponent(username)}`);
+    const p = data.profile;
+    const isOwn = state.me && state.me.id === p.user.id;
+
+    app.innerHTML = `
+      <section class="card page-card">
+        <div class="admin-row-head">
+          <span class="post-author">@${esc(p.user.username)}</span>
+          ${p.user.is_admin ? '<span class="badge admin">admin</span>' : ''}
+          ${p.user.is_moderator ? '<span class="badge">moderator</span>' : ''}
+          <span class="muted">joined ${time(p.user.created_at)}</span>
+        </div>
+
+        <div class="meta">
+          <span>threads: ${p.user.thread_count}</span>
+          <span>posts: ${p.user.post_count}</span>
+        </div>
+
+        <div class="post-body">
+          ${p.user.bio ? mdToHtml(p.user.bio) : '<span class="muted">No bio yet.</span>'}
+        </div>
+
+        <div class="admin-controls">
+          ${state.me && !isOwn ? `<a class="btn small" href="#/messages/new?to=${encodeURIComponent(p.user.username)}">Send PM</a>` : ''}
+          ${isOwn ? `
+            <details>
+              <summary class="link">Edit bio</summary>
+              <form id="bio-form" class="form">
+                <textarea id="bio-input" class="input" maxlength="500">${esc(p.user.bio || '')}</textarea>
+                <button class="btn small" type="submit">Save bio</button>
+                <div id="bio-error" class="form-error"></div>
+              </form>
+            </details>
+          ` : ''}
+        </div>
+      </section>
+
+      <section class="section-head"><h2>Latest threads</h2></section>
+      ${p.threads.length ? `<section class="thread-list">${p.threads.map(threadItemHtml).join('')}</section>` : '<section class="empty">No threads yet.</section>'}
+
+      <section class="section-head"><h2>Latest posts</h2></section>
+      ${
+        p.posts.length
+          ? `<section>${p.posts
+              .map(
+                (post) => `
+                  <article class="post">
+                    <header>
+                      <div class="meta">in <a href="#/thread/${Number(post.thread_id)}">${esc(post.thread_title)}</a></div>
+                      <time>${time(post.created_at)}</time>
+                    </header>
+                    <div class="post-body">${mdToHtml(post.body.slice(0, 400))}</div>
+                  </article>
+                `
+              )
+              .join('')}</section>`
+          : '<section class="empty">No posts yet.</section>'
+      }
+
+      <section class="section-head"><h2>Mentions</h2></section>
+      ${
+        p.mentions.length
+          ? `<section>${p.mentions
+              .map(
+                (m) => `
+                  <article class="post">
+                    <header>
+                      <div class="meta">mentioned by ${userLink(m.author)} in <a href="#/thread/${Number(m.thread_id)}">${esc(m.thread_title)}</a></div>
+                      <time>${time(m.created_at)}</time>
+                    </header>
+                    <div class="post-body muted">${esc((m.body || '').slice(0, 200))}</div>
+                  </article>
+                `
+              )
+              .join('')}</section>`
+          : '<section class="empty">No mentions yet.</section>'
+      }
+    `;
+
+    const bioForm = document.getElementById('bio-form');
+
+    if (bioForm) {
+      bioForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+
+        const bio = document.getElementById('bio-input').value;
+        const errorEl = document.getElementById('bio-error');
+
+        try {
+          await api('/api/profile', { method: 'POST', body: JSON.stringify({ bio }) });
+          toast('Bio updated');
+          await render();
+        } catch (error) {
+          errorEl.textContent = error.message;
+        }
+      });
+    }
+  };
+}
+
+function pmRowHtml(m, box) {
+  const other = box === 'inbox' ? m.sender_username : m.recipient_username;
+  const unread = box === 'inbox' && !m.read_at;
+
+  return `
+    <a class="thread" href="#/messages/user/${encodeURIComponent(other)}">
+      <h3 class="thread-title">${unread ? '<span class="badge warn">new</span> ' : ''}${esc(other)}</h3>
+      <div class="meta">
+        <span>${esc((m.body || '').slice(0, 120))}</span>
+        <span>${time(m.created_at)}</span>
+      </div>
+    </a>
+  `;
+}
+
+function renderMessages(query) {
+  return async function messagesView() {
+    if (!state.me) {
+      location.hash = '#/login';
+      return;
+    }
+
+    const box = query.get('box') === 'outbox' ? 'outbox' : 'inbox';
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+
+    const data = await api(`/api/messages?box=${box}&page=${page}`);
+    const messages = data.messages || [];
+
+    app.innerHTML = `
+      <section class="section-head">
+        <h1>Private messages</h1>
+        <a class="btn small" href="#/messages/new">New message</a>
+      </section>
+
+      <nav class="tabs">
+        <a class="tab ${box === 'inbox' ? 'active' : ''}" href="#/messages?box=inbox">Inbox</a>
+        <a class="tab ${box === 'outbox' ? 'active' : ''}" href="#/messages?box=outbox">Outbox</a>
+      </nav>
+
+      ${messages.length ? `<section class="thread-list">${messages.map((m) => pmRowHtml(m, box)).join('')}</section>` : '<section class="empty">No messages.</section>'}
+
+      ${paginationHtml(`#/messages?box=${box}`, page, Boolean(data.hasMore))}
+    `;
+  };
+}
+
+function renderConversation(username) {
+  return async function conversationView() {
+    if (!state.me) {
+      location.hash = '#/login';
+      return;
+    }
+
+    const page = Math.max(1, Number(parseRoute().query.get('page') || 1) || 1);
+    const data = await api(`/api/messages?with=${encodeURIComponent(username)}&page=${page}`);
+    const messages = data.messages || [];
+
+    await loadMe();
+    updateAuthArea();
+
+    app.innerHTML = `
+      <section class="section-head">
+        <h1>Chat with ${userLink(data.with.username)}</h1>
+        <a class="btn ghost small" href="#/messages">Back to inbox</a>
+      </section>
+
+      <section>
+        ${messages
+          .map(
+            (m) => `
+              <article class="post">
+                <header>
+                  <div class="post-author">${userLink(m.sender_username)}</div>
+                  <time>${time(m.created_at)}</time>
+                </header>
+                <div class="post-body">${mdToHtml(m.body)}</div>
+              </article>
+            `
+          )
+          .join('') || '<section class="empty">No messages yet.</section>'}
+      </section>
+
+      ${paginationHtml(`#/messages/user/${encodeURIComponent(username)}`, page, Boolean(data.hasMore))}
+
+      <form id="pm-reply-form" class="form">
+        <label>
+          Message
+          <textarea id="pm-reply-body" maxlength="5000" required minlength="1"></textarea>
+        </label>
+        <button class="btn" type="submit">Send</button>
+        <div id="pm-reply-error" class="form-error"></div>
+      </form>
+    `;
+
+    document.getElementById('pm-reply-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const body = document.getElementById('pm-reply-body').value;
+      const errorEl = document.getElementById('pm-reply-error');
+
+      try {
+        await api('/api/messages', {
+          method: 'POST',
+          body: JSON.stringify({ toUsername: username, body })
+        });
+
+        toast('Sent');
+        await render();
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    });
+  };
+}
+
+function renderNewMessage(query) {
+  return function newMessageView() {
+    if (!state.me) {
+      location.hash = '#/login';
+      return;
+    }
+
+    const to = query.get('to') || '';
+
+    app.innerHTML = `
+      <section class="card page-card narrow">
+        <h1>New message</h1>
+        <form id="pm-new-form" class="form">
+          <label>
+            To
+            <input id="pm-to" class="input" required minlength="3" maxlength="32" value="${esc(to)}" />
+          </label>
+          <label>
+            Message
+            <textarea id="pm-body" maxlength="5000" required minlength="1"></textarea>
+          </label>
+          <button class="btn" type="submit">Send</button>
+          <div id="pm-error" class="form-error"></div>
+        </form>
+      </section>
+    `;
+
+    document.getElementById('pm-new-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const toUsername = document.getElementById('pm-to').value.trim();
+      const body = document.getElementById('pm-body').value;
+      const errorEl = document.getElementById('pm-error');
+
+      try {
+        await api('/api/messages', {
+          method: 'POST',
+          body: JSON.stringify({ toUsername, body })
+        });
+
+        toast('Sent');
+        location.hash = `#/messages/user/${encodeURIComponent(toUsername)}`;
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    });
+  };
 }
 
 function reportRowHtml(report) {
@@ -661,26 +982,26 @@ function reportRowHtml(report) {
     <article class="admin-row">
       <div class="admin-row-head">
         <span class="badge ${report.status === 'open' ? 'warn' : ''}">${esc(report.status)}</span>
-        <span class="muted">жалоба от @${esc(report.reporter)}</span>
+        <span class="muted">reported by @${esc(report.reporter)}</span>
         <time>${time(report.created_at)}</time>
       </div>
 
-      <p class="report-reason">Причина: ${esc(report.reason)}</p>
+      <p class="report-reason">Reason: ${esc(report.reason)}</p>
 
       <div class="post-body muted">
-        Пост @${esc(report.post_author)}: ${esc(bodyPreview.slice(0, 300))}${bodyPreview.length > 300 ? '…' : ''}
+        Post by @${esc(report.post_author)}: ${esc(bodyPreview.slice(0, 300))}${bodyPreview.length > 300 ? '…' : ''}
       </div>
 
       <div class="meta">
-        <a href="#/thread/${Number(report.thread_id)}">Тред: ${esc(report.thread_title)}</a>
+        <a href="#/thread/${Number(report.thread_id)}">Thread: ${esc(report.thread_title)}</a>
       </div>
 
       ${
         report.status === 'open'
           ? `
             <div class="admin-controls">
-              <button class="btn small" data-admin-report="${report.id}" data-admin-action="resolve">Решено</button>
-              <button class="btn ghost small" data-admin-report="${report.id}" data-admin-action="dismiss">Отклонить</button>
+              <button class="btn small" data-admin-report="${report.id}" data-admin-action="resolve">Resolve</button>
+              <button class="btn ghost small" data-admin-report="${report.id}" data-admin-action="dismiss">Dismiss</button>
             </div>
           `
           : ''
@@ -701,21 +1022,21 @@ function userRowHtml(user) {
 
       <div class="meta">
         <span>id: ${user.id}</span>
-        <span>тредов: ${user.thread_count}</span>
-        <span>постов: ${user.post_count}</span>
-        <span>с ${time(user.created_at)}</span>
+        <span>threads: ${user.thread_count}</span>
+        <span>posts: ${user.post_count}</span>
+        <span>since ${time(user.created_at)}</span>
       </div>
 
       <div class="admin-controls">
         ${
           user.banned
-            ? `<button class="btn small" data-admin-user="${user.id}" data-admin-action="unban">Разбанить</button>`
-            : `<button class="btn danger small" data-admin-user="${user.id}" data-admin-action="ban">Забанить</button>`
+            ? `<button class="btn small" data-admin-user="${user.id}" data-admin-action="unban">Unban</button>`
+            : `<button class="btn danger small" data-admin-user="${user.id}" data-admin-action="ban">Ban</button>`
         }
         ${
           user.is_moderator
-            ? `<button class="btn ghost small" data-admin-user="${user.id}" data-admin-action="mod_demote">Снять модера</button>`
-            : `<button class="btn ghost small" data-admin-user="${user.id}" data-admin-action="mod_promote">В модераторы</button>`
+            ? `<button class="btn ghost small" data-admin-user="${user.id}" data-admin-action="mod_demote">Demote moderator</button>`
+            : `<button class="btn ghost small" data-admin-user="${user.id}" data-admin-action="mod_promote">Make moderator</button>`
         }
       </div>
     </article>
@@ -749,7 +1070,7 @@ async function exportBackup() {
     a.click();
 
     URL.revokeObjectURL(url);
-    toast('Экспорт готов');
+    toast('Export ready');
   } catch (error) {
     toast(error.message, true);
   }
@@ -761,7 +1082,7 @@ function renderAdmin(query) {
       app.innerHTML = `
         <section class="card page-card narrow">
           <h1>403</h1>
-          <p class="error">Доступ только для стаффа.</p>
+          <p class="error">Staff only.</p>
         </section>
       `;
       return;
@@ -775,7 +1096,7 @@ function renderAdmin(query) {
       app.innerHTML = `
         <section class="card page-card narrow">
           <h1>403</h1>
-          <p class="error">Этот раздел — только для админа.</p>
+          <p class="error">This section is admin-only.</p>
         </section>
       `;
       return;
@@ -789,14 +1110,14 @@ function renderAdmin(query) {
 
       content = `
         <div class="admin-controls">
-          <a class="btn ghost small" href="#/admin?tab=reports&status=open">Открытые</a>
-          <a class="btn ghost small" href="#/admin?tab=reports&status=all">Все</a>
+          <a class="btn ghost small" href="#/admin?tab=reports&status=open">Open</a>
+          <a class="btn ghost small" href="#/admin?tab=reports&status=all">All</a>
         </div>
       `;
 
       content += reports.length
         ? reports.map(reportRowHtml).join('')
-        : '<section class="empty">Жалоб нет.</section>';
+        : '<section class="empty">No reports.</section>';
 
       content += paginationHtml(`#/admin?tab=reports&status=${encodeURIComponent(status)}`, page, data.hasMore);
     } else if (tab === 'users') {
@@ -806,13 +1127,13 @@ function renderAdmin(query) {
 
       content = `
         <form id="admin-user-search" class="form">
-          <input id="admin-user-q" class="input" placeholder="Поиск ника" value="${esc(q)}" maxlength="32" />
+          <input id="admin-user-q" class="input" placeholder="Search username" value="${esc(q)}" maxlength="32" />
         </form>
       `;
 
       content += users.length
         ? users.map(userRowHtml).join('')
-        : '<section class="empty">Никого не нашли.</section>';
+        : '<section class="empty">Nobody found.</section>';
 
       content += paginationHtml(`#/admin?tab=users&q=${encodeURIComponent(q)}`, page, data.hasMore);
     } else {
@@ -821,21 +1142,21 @@ function renderAdmin(query) {
 
       content = logs.length
         ? logs.map(auditRowHtml).join('')
-        : '<section class="empty">Журнал пуст.</section>';
+        : '<section class="empty">Log is empty.</section>';
 
       content += paginationHtml('#/admin?tab=audit', page, data.hasMore);
     }
 
     app.innerHTML = `
       <section class="section-head">
-        <h1>Админка</h1>
-        ${state.me.isAdmin ? '<button id="export-btn" class="btn ghost small">Скачать бэкап (JSON)</button>' : ''}
+        <h1>Admin</h1>
+        ${state.me.isAdmin ? '<button id="export-btn" class="btn ghost small">Download backup (JSON)</button>' : ''}
       </section>
 
       <nav class="tabs">
-        <a class="tab ${tab === 'reports' ? 'active' : ''}" href="#/admin?tab=reports">Жалобы</a>
-        ${state.me.isAdmin ? `<a class="tab ${tab === 'users' ? 'active' : ''}" href="#/admin?tab=users">Пользователи</a>` : ''}
-        ${state.me.isAdmin ? `<a class="tab ${tab === 'audit' ? 'active' : ''}" href="#/admin?tab=audit">Журнал</a>` : ''}
+        <a class="tab ${tab === 'reports' ? 'active' : ''}" href="#/admin?tab=reports">Reports</a>
+        ${state.me.isAdmin ? `<a class="tab ${tab === 'users' ? 'active' : ''}" href="#/admin?tab=users">Users</a>` : ''}
+        ${state.me.isAdmin ? `<a class="tab ${tab === 'audit' ? 'active' : ''}" href="#/admin?tab=audit">Audit log</a>` : ''}
       </nav>
 
       <section class="admin-list">${content}</section>
@@ -879,24 +1200,24 @@ function renderLogin() {
   return function loginView() {
     app.innerHTML = `
       <section class="card page-card narrow">
-        <h1>Вход</h1>
+        <h1>Log in</h1>
         <form id="login-form" class="form">
           <label>
-            Ник
+            Username
             <input id="login-username" class="input" autocomplete="username" required minlength="3" maxlength="32" />
           </label>
 
           <label>
-            Пароль
+            Password
             <input id="login-password" class="input" type="password" autocomplete="current-password" required minlength="12" maxlength="128" />
           </label>
 
           <div id="turnstile-box"></div>
 
-          <button class="btn" type="submit">Войти</button>
+          <button class="btn" type="submit">Log in</button>
           <div id="form-error" class="form-error"></div>
         </form>
-        <p><a href="#/recover">Забыл пароль / восстановить доступ</a></p>
+        <p><a href="#/recover">Forgot password / recover access</a></p>
       </section>
     `;
 
@@ -935,38 +1256,37 @@ function renderRegister() {
   return function registerView() {
     app.innerHTML = `
       <section class="card page-card narrow">
-        <h1>Регистрация</h1>
+        <h1>Register</h1>
 
         <p class="muted">
-          Регистрация означает согласие с правилами: только легальные исследования,
-          только собственные устройства/сети/аккаунты или письменные разрешения.
-          Администрация не несёт ответственности за действия пользователя вне площадки,
-          пользователь сам обязан соблюдать законы и нормы.
+          By registering you agree to the rules: legal research only, your own
+          devices/networks/accounts or written permission. The administration is not
+          responsible for user actions outside the platform; the user must comply
+          with applicable laws.
         </p>
 
         <form id="register-form" class="form">
           <label>
-            Ник
+            Username
             <input id="register-username" class="input" autocomplete="username" required minlength="3" maxlength="32" />
           </label>
 
           <label>
-            Пароль
+            Password
             <input id="register-password" class="input" type="password" autocomplete="new-password" required minlength="12" maxlength="128" />
           </label>
 
           <label class="checkbox">
             <input id="register-terms" type="checkbox" required />
             <span>
-              Я принимаю <a href="#/rules" target="_blank" rel="noopener">правила</a> и понимаю,
-              что площадка предназначена только для познавательных, исследовательских,
-              учебных и авторизованных security-задач.
+              I accept the <a href="#/rules" target="_blank" rel="noopener">rules</a> and understand
+              that the platform is for educational, research and authorized security purposes only.
             </span>
           </label>
 
           <div id="turnstile-box"></div>
 
-          <button class="btn" type="submit">Создать аккаунт</button>
+          <button class="btn" type="submit">Create account</button>
           <div id="form-error" class="form-error"></div>
         </form>
       </section>
@@ -995,7 +1315,7 @@ function renderRegister() {
 
         state.me = await api('/api/auth/me');
         updateAuthArea();
-        toast('Аккаунт создан');
+        toast('Account created');
         location.hash = '#/';
 
         if (data.recoveryCode) {
@@ -1014,30 +1334,30 @@ function renderRecover() {
   return function recoverView() {
     app.innerHTML = `
       <section class="card page-card narrow">
-        <h1>Восстановление доступа</h1>
+        <h1>Recover access</h1>
 
         <p class="muted">
-          Введи ник и recovery-код, который получил при регистрации.
-          После сброса пароля старый код сгорит — получишь новый.
+          Enter your username and the recovery code you got at registration.
+          After reset the old code is burned — you will get a new one.
         </p>
 
         <form id="recover-form" class="form">
           <label>
-            Ник
+            Username
             <input id="recover-username" class="input" autocomplete="username" required minlength="3" maxlength="32" />
           </label>
 
           <label>
-            Recovery-код
+            Recovery code
             <input id="recover-code" class="input" autocomplete="off" required placeholder="PH-XXXX-XXXX-XXXX-XXXX" />
           </label>
 
           <label>
-            Новый пароль
+            New password
             <input id="recover-password" class="input" type="password" autocomplete="new-password" required minlength="12" maxlength="128" />
           </label>
 
-          <button class="btn" type="submit">Сбросить пароль</button>
+          <button class="btn" type="submit">Reset password</button>
           <div id="form-error" class="form-error"></div>
         </form>
       </section>
@@ -1057,7 +1377,7 @@ function renderRecover() {
           body: JSON.stringify({ username, recoveryCode, newPassword })
         });
 
-        toast('Пароль изменён. Войди с новым паролем.');
+        toast('Password changed. Log in with the new password.');
         location.hash = '#/login';
 
         if (data.recoveryCode) {
@@ -1082,18 +1402,18 @@ function renderNewThread(query) {
 
     app.innerHTML = `
       <section class="card page-card narrow">
-        <h1>Новый тред</h1>
+        <h1>New thread</h1>
 
         <p class="muted">
-          Перед публикацией убедись, что тема относится к легальным исследованиям,
-          обучению, CTF, defensive security или авторизованному пентесту.
+          Before publishing, make sure the topic is about legal research, education,
+          CTF, defensive security or authorized pentesting.
         </p>
 
         <form id="new-thread-form" class="form">
           <label>
-            Категория
+            Category
             <select id="thread-category" required>
-              <option value="">Выбери категорию</option>
+              <option value="">Pick a category</option>
               ${categories
                 .map(
                   (category) => `
@@ -1107,20 +1427,20 @@ function renderNewThread(query) {
           </label>
 
           <label>
-            Заголовок
+            Title
             <input id="thread-title" class="input" required minlength="4" maxlength="160" />
           </label>
 
           <label>
-            Текст первого поста
+            First post
             <textarea id="thread-body" required minlength="1" maxlength="10000"></textarea>
           </label>
 
           <p class="muted">
-            Markdown: **жирный**, *курсив*, \`код\`, \`\`\`блоки кода\`\`\`, списки (- и 1.), &gt; цитаты, [ссылка](https://example.com)
+            Markdown: **bold**, *italic*, \`code\`, \`\`\`code blocks\`\`\`, lists (- and 1.), &gt; quotes, [link](https://example.com), @mentions
           </p>
 
-          <button class="btn" type="submit">Опубликовать</button>
+          <button class="btn" type="submit">Publish</button>
           <div id="form-error" class="form-error"></div>
         </form>
       </section>
@@ -1140,7 +1460,7 @@ function renderNewThread(query) {
           body: JSON.stringify({ categoryId, title, body })
         });
 
-        toast('Тред создан');
+        toast('Thread created');
         location.hash = `#/thread/${data.id}`;
       } catch (error) {
         errorEl.textContent = error.message;
@@ -1156,8 +1476,8 @@ function renderSearch(query) {
     if (q.length < 3) {
       app.innerHTML = `
         <section class="card page-card narrow">
-          <h1>Поиск</h1>
-          <p class="notice">Введи минимум 3 символа.</p>
+          <h1>Search</h1>
+          <p class="notice">Enter at least 3 characters.</p>
         </section>
       `;
       return;
@@ -1168,13 +1488,13 @@ function renderSearch(query) {
 
     app.innerHTML = `
       <section class="section-head">
-        <h1>Поиск: ${esc(q)}</h1>
+        <h1>Search: ${esc(q)}</h1>
       </section>
 
       ${
         results.length
           ? `<section class="thread-list">${results.map(threadItemHtml).join('')}</section>`
-          : '<section class="empty">Ничего не найдено.</section>'
+          : '<section class="empty">Nothing found.</section>'
       }
     `;
   };
@@ -1184,34 +1504,33 @@ function renderRules() {
   return function rulesView() {
     app.innerHTML = `
       <section class="card page-card narrow">
-        <h1>Правила PentHub</h1>
+        <h1>PentHub Rules</h1>
 
-        <h2>Разрешено</h2>
+        <h2>Allowed</h2>
         <ul>
-          <li>Авторизованный пентест при наличии письменного разрешения.</li>
-          <li>Исследование собственных устройств, сетей и аккаунтов.</li>
-          <li>CTF, учебные стенды, sandbox-лаборатории.</li>
-          <li>Defensive security: защита, мониторинг, харденинг, детект.</li>
-          <li>Hardware security lab на своём железе.</li>
-          <li>Обсуждение responsible disclosure и правовых рамок.</li>
+          <li>Authorized pentesting with written permission.</li>
+          <li>Research on your own devices, networks and accounts.</li>
+          <li>CTF, training stands, sandbox labs.</li>
+          <li>Defensive security: protection, monitoring, hardening, detection.</li>
+          <li>Hardware security labs on your own hardware.</li>
+          <li>Responsible disclosure and legal framework discussions.</li>
         </ul>
 
-        <h2>Запрещено</h2>
+        <h2>Prohibited</h2>
         <ul>
-          <li>Обсуждение атак на чужие системы без разрешения.</li>
-          <li>Глушилки, jamming, деаутентификация, DoS/DDoS.</li>
-          <li>Брутфорс и подбор паролей к чужим аккаунтам/системам.</li>
-          <li>Малварь, стилеры, ransomware, ботнеты.</li>
-          <li>Кардинг, скимминг, кража данных, мошенничество.</li>
-          <li>Продажа эксплойтов/доступов/учёток для незаконного использования.</li>
+          <li>Discussing attacks on third-party systems without permission.</li>
+          <li>Jammers, jamming, deauthentication, DoS/DDoS.</li>
+          <li>Brute-forcing third-party accounts/systems.</li>
+          <li>Malware, stealers, ransomware, botnets.</li>
+          <li>Carding, skimming, data theft, fraud.</li>
+          <li>Selling exploits/access/accounts for illegal use.</li>
         </ul>
 
-        <h2>Юридическая часть</h2>
+        <h2>Legal</h2>
         <p>
-          Площадка носит познавательный, учебный и исследовательский характер.
-          Пользователь несёт полную ответственность за свои действия вне форума
-          и обязан соблюдать применимое законодательство.
-          Администрация не несёт ответственности за действия пользователей вне платформы.
+          The platform is educational and research-oriented. The user is fully responsible
+          for their actions outside the forum and must comply with applicable law.
+          The administration is not responsible for user actions outside the platform.
         </p>
       </section>
     `;
@@ -1223,8 +1542,8 @@ function renderNotFound() {
     app.innerHTML = `
       <section class="card page-card narrow">
         <h1>404</h1>
-        <p class="muted">Страница не найдена.</p>
-        <p><a href="#/">Вернуться на главную</a></p>
+        <p class="muted">Page not found.</p>
+        <p><a href="#/">Back home</a></p>
       </section>
     `;
   };
@@ -1233,7 +1552,7 @@ function renderNotFound() {
 async function render() {
   const { segments, query } = parseRoute();
 
-  app.innerHTML = '<div class="loading">Загрузка...</div>';
+  app.innerHTML = '<div class="loading">Loading...</div>';
 
   try {
     const section = segments[0] || '';
@@ -1244,6 +1563,16 @@ async function render() {
       await renderCategory(segments[1], query)();
     } else if (section === 'thread') {
       await renderThread(segments[1], query)();
+    } else if (section === 'user') {
+      await renderProfile(segments[1])();
+    } else if (section === 'messages') {
+      if (segments[1] === 'user') {
+        await renderConversation(segments[2])();
+      } else if (segments[1] === 'new') {
+        renderNewMessage(query)();
+      } else {
+        await renderMessages(query)();
+      }
     } else if (section === 'login') {
       renderLogin()();
     } else if (section === 'register') {
@@ -1264,9 +1593,9 @@ async function render() {
   } catch (error) {
     app.innerHTML = `
       <section class="card page-card narrow">
-        <h1>Ошибка</h1>
+        <h1>Error</h1>
         <p class="error">${esc(error.message)}</p>
-        <p><a href="#/">Вернуться на главную</a></p>
+        <p><a href="#/">Back home</a></p>
       </section>
     `;
   }
@@ -1290,7 +1619,7 @@ async function submitReport() {
   const reason = document.getElementById('modal-reason').value.trim();
 
   if (!reason) {
-    toast('Укажи причину жалобы', true);
+    toast('Specify a reason', true);
     return;
   }
 
@@ -1301,7 +1630,7 @@ async function submitReport() {
     });
 
     closeReportModal();
-    toast('Жалоба отправлена');
+    toast('Report sent');
   } catch (error) {
     toast(error.message, true);
   }
@@ -1312,9 +1641,9 @@ async function copyRecoveryCode() {
 
   try {
     await navigator.clipboard.writeText(code);
-    toast('Код скопирован');
+    toast('Code copied');
   } catch {
-    toast('Скопируй код вручную', true);
+    toast('Copy the code manually', true);
   }
 }
 
