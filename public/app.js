@@ -4119,3 +4119,326 @@ function bindAdminPage() {
     document.getElementById('changelog-modal').classList.remove('hidden');
   });
 }
+// === PART 5: sidebar bottom account + full settings ===
+
+function updateSidebar() {
+  if (!sidebar) return;
+
+  const ntf = Number(state.me?.notifications_unread || 0);
+  const pm = Number(state.me?.unread_count || 0);
+  const active = location.hash.replace(/^#\/?/, '').split('?')[0];
+
+  const main = [
+    { href: '', label: 'Home', icon: ICONS.home },
+    { href: 'forum', label: 'Forum', icon: ICONS.book },
+    { href: 'categories', label: 'Categories', icon: ICONS.grid },
+    { href: 'learn', label: 'Learn', icon: ICONS.grad },
+    { href: 'firmware', label: 'Firmware', icon: ICONS.shield },
+    { href: 'rules', label: 'Rules', icon: ICONS.book },
+    { href: 'support', label: 'Support', icon: ICONS.help }
+  ];
+
+  const account = [
+    state.me ? { href: 'notifications', label: 'Notifications', icon: ICONS.bell, count: ntf } : null,
+    state.me ? { href: 'messages', label: 'Messages', icon: ICONS.mail, count: pm } : null,
+    state.me ? { href: `user/${encodeURIComponent(state.me.username)}`, label: 'Profile', icon: ICONS.user } : null,
+    state.me ? { href: 'settings', label: 'Settings', icon: ICONS.settings } : null,
+    isStaff() ? { href: 'admin', label: 'Admin', icon: ICONS.shield } : null,
+    state.me ? { href: '__logout__', label: 'Log out', icon: '✕', danger: true } : null
+  ].filter(Boolean);
+
+  const sideItem = (item) => {
+    const isActive = active === item.href || (item.href && active.startsWith(item.href + '/'));
+    const cls = `side-item ${isActive ? 'active' : ''} ${item.danger ? 'danger' : ''}`;
+    const count = item.count ? `<span class="side-count">${item.count}</span>` : '';
+
+    if (item.href === '__logout__') {
+      return `<button class="${cls}" data-logout="1">${item.icon}<span>${item.label}</span>${count}</button>`;
+    }
+
+    return `<a class="${cls}" href="#/${item.href}">${item.icon}<span>${item.label}</span>${count}</a>`;
+  };
+
+  sidebar.innerHTML = `
+    ${main.map(sideItem).join('')}
+    ${account.length ? `<div class="side-account"><div class="side-section">Account</div>${account.map(sideItem).join('')}</div>` : ''}
+  `;
+
+  sidebar.querySelectorAll('[data-logout]').forEach((b) => b.addEventListener('click', logout));
+}
+
+function renderSettings(query) {
+  return async function settingsView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const tab = ['appearance', 'security', 'privacy', 'danger'].includes(query.get('tab')) ? query.get('tab') : 'profile';
+
+    const [data, account] = await Promise.all([
+      api('/api/settings'),
+      api('/api/account').catch(() => ({ sessions: [], prefs: {} }))
+    ]);
+
+    const p = data.profile;
+    const prefs = account.prefs || {};
+    const sessions = account.sessions || [];
+
+    let content = '';
+
+    if (tab === 'profile') {
+      content = `
+        <form id="settings-profile" class="form">
+          <label>Display name <input id="s-display" class="input" maxlength="40" value="${esc(p.display_name || '')}" placeholder="How others see you" /></label>
+          <label>Username <input class="input" value="@${esc(p.username)}" disabled /></label>
+          <label>Bio <textarea id="s-bio" maxlength="500">${esc(p.bio || '')}</textarea></label>
+          <button class="btn small" type="submit">Save profile</button>
+          <div id="profile-error" class="form-error"></div>
+        </form>
+      `;
+    } else if (tab === 'appearance') {
+      content = `
+        <h2>Avatar</h2>
+        <div class="image-upload">
+          <div class="preview" id="s-avatar-preview">${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : avatarHtml(p.username)}</div>
+          <input type="file" id="s-avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" />
+          <button class="btn small" type="button" id="s-avatar-upload">Upload</button>
+          <button class="btn ghost small" type="button" id="s-avatar-clear">Remove</button>
+        </div>
+        <p class="muted">PNG / JPEG / WebP / GIF, up to 256KB.</p>
+
+        <h2>Banner</h2>
+        <div class="image-upload">
+          <div class="preview banner" id="s-banner-preview" ${p.banner ? `style="background-image:url('${esc(p.banner)}')"` : ''}></div>
+          <input type="file" id="s-banner-file" accept="image/png,image/jpeg,image/webp" />
+          <button class="btn small" type="button" id="s-banner-upload">Upload</button>
+          <button class="btn ghost small" type="button" id="s-banner-clear">Remove</button>
+        </div>
+        <p class="muted">PNG / JPEG / WebP, up to 512KB. Shown on your profile.</p>
+      `;
+    } else if (tab === 'security') {
+      content = `
+        <h2>Change username</h2>
+        <form id="settings-username" class="form">
+          <label>New username <input id="s-username" class="input" minlength="3" maxlength="32" value="${esc(p.username)}" required /></label>
+          <button class="btn small" type="submit">Change username</button>
+          <div id="username-error" class="form-error"></div>
+        </form>
+
+        <h2>Change password</h2>
+        <form id="settings-password" class="form">
+          <label>Current password <input id="s-current" class="input" type="password" required /></label>
+          <label>New password <input id="s-new" class="input" type="password" required minlength="12" maxlength="128" /></label>
+          <button class="btn small" type="submit">Change password</button>
+          <div id="password-error" class="form-error"></div>
+        </form>
+
+        <h2>Recovery code</h2>
+        <p class="muted">Rotate your recovery code. The old one stops working immediately.</p>
+        <form id="settings-recovery" class="form">
+          <label>Current recovery code <input id="s-rec" class="input" autocomplete="off" required placeholder="PH-XXXX-XXXX-XXXX-XXXX" /></label>
+          <button class="btn small" type="submit">Rotate recovery code</button>
+          <div id="recovery-error" class="form-error"></div>
+        </form>
+
+        <h2>Active sessions</h2>
+        ${sessions.map((s) => `
+          <article class="admin-row">
+            <div class="admin-row-head">
+              <span class="chip ${s.current ? 'green' : ''}">${s.current ? 'current device' : 'session'}</span>
+              <span class="muted">${esc(s.ip || 'unknown')}</span>
+              <span class="muted">· started ${time(s.created_at)}</span>
+            </div>
+            ${s.current ? '' : `<div class="admin-controls"><button class="btn danger small" data-revoke="${esc(s.token_hash)}">Revoke</button></div>`}
+          </article>
+        `).join('') || '<section class="empty">No sessions.</section>'}
+        <button class="btn ghost small" id="revoke-others">Log out all other devices</button>
+      `;
+    } else if (tab === 'privacy') {
+      content = `
+        <form id="settings-privacy" class="form">
+          <label>Who can send you private messages
+            <select id="s-pm-policy">
+              <option value="all" ${prefs.pm_policy === 'all' ? 'selected' : ''}>Everyone</option>
+              <option value="staff" ${prefs.pm_policy === 'staff' ? 'selected' : ''}>Staff only</option>
+              <option value="none" ${prefs.pm_policy === 'none' ? 'selected' : ''}>Nobody</option>
+            </select>
+          </label>
+
+          <label class="checkbox"><input type="checkbox" id="s-hidden" ${prefs.profile_hidden ? 'checked' : ''} /><span>Hide my profile from other users (staff always sees it)</span></label>
+          <label class="checkbox"><input type="checkbox" id="s-ntf-reply" ${prefs.notify_reply !== false ? 'checked' : ''} /><span>Notify me about replies to my threads</span></label>
+          <label class="checkbox"><input type="checkbox" id="s-ntf-mention" ${prefs.notify_mention !== false ? 'checked' : ''} /><span>Notify me about @mentions</span></label>
+          <label class="checkbox"><input type="checkbox" id="s-ntf-reaction" ${prefs.notify_reaction !== false ? 'checked' : ''} /><span>Notify me about reactions</span></label>
+
+          <button class="btn small" type="submit">Save preferences</button>
+          <div id="privacy-error" class="form-error"></div>
+        </form>
+      `;
+    } else if (tab === 'danger') {
+      content = `
+        <div class="card danger-zone">
+          <h2 style="margin-top:0">Delete account</h2>
+          <p class="muted">This permanently removes your account, threads, posts and messages. There is no undo.</p>
+          <form id="settings-delete" class="form">
+            <label>Confirm password <input id="s-del-pass" class="input" type="password" required /></label>
+            <button class="btn danger" type="submit" id="delete-account-btn">Delete my account</button>
+            <div id="delete-error" class="form-error"></div>
+          </form>
+        </div>
+      `;
+    }
+
+    app.innerHTML = `
+      <section class="page-head"><h1>Settings</h1></section>
+
+      <div class="settings-grid">
+        <nav class="settings-nav">
+          <a class="tab ${tab === 'profile' ? 'active' : ''}" href="#/settings?tab=profile">Profile</a>
+          <a class="tab ${tab === 'appearance' ? 'active' : ''}" href="#/settings?tab=appearance">Appearance</a>
+          <a class="tab ${tab === 'security' ? 'active' : ''}" href="#/settings?tab=security">Security</a>
+          <a class="tab ${tab === 'privacy' ? 'active' : ''}" href="#/settings?tab=privacy">Privacy</a>
+          <a class="tab ${tab === 'danger' ? 'active' : ''}" href="#/settings?tab=danger">Danger zone</a>
+        </nav>
+
+        <div class="card" style="margin-bottom:0">${content}</div>
+      </div>
+    `;
+
+    // profile
+    document.getElementById('settings-profile')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await api('/api/settings', {
+          method: 'POST',
+          body: JSON.stringify({ field: 'profile', display_name: document.getElementById('s-display').value, bio: document.getElementById('s-bio').value })
+        });
+        toast('Profile saved');
+        await loadMe();
+      } catch (err) { document.getElementById('profile-error').textContent = err.message; }
+    });
+
+    // appearance
+    if (tab === 'appearance') {
+      document.getElementById('s-avatar-upload').addEventListener('click', async () => {
+        try {
+          const dataUrl = await fileToDataURL(document.getElementById('s-avatar-file').files[0], 262144);
+          await api('/api/settings', { method: 'POST', body: JSON.stringify({ field: 'avatar', avatar: dataUrl }) });
+          document.getElementById('s-avatar-preview').innerHTML = `<img src="${esc(dataUrl)}" alt="">`;
+          toast('Avatar updated');
+          await loadMe();
+        } catch (err) { toast(err.message, true); }
+      });
+
+      document.getElementById('s-avatar-clear').addEventListener('click', async () => {
+        try {
+          await api('/api/settings', { method: 'POST', body: JSON.stringify({ field: 'avatar', avatar: '' }) });
+          toast('Avatar removed'); await render();
+        } catch (err) { toast(err.message, true); }
+      });
+
+      document.getElementById('s-banner-upload').addEventListener('click', async () => {
+        try {
+          const dataUrl = await fileToDataURL(document.getElementById('s-banner-file').files[0], 524288);
+          await api('/api/settings', { method: 'POST', body: JSON.stringify({ field: 'banner', banner: dataUrl }) });
+          document.getElementById('s-banner-preview').style.backgroundImage = `url('${dataUrl}')`;
+          toast('Banner updated'); await loadMe();
+        } catch (err) { toast(err.message, true); }
+      });
+
+      document.getElementById('s-banner-clear').addEventListener('click', async () => {
+        try {
+          await api('/api/settings', { method: 'POST', body: JSON.stringify({ field: 'banner', banner: '' }) });
+          toast('Banner removed'); await render();
+        } catch (err) { toast(err.message, true); }
+      });
+    }
+
+    // security
+    document.getElementById('settings-username')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await api('/api/account', { method: 'POST', body: JSON.stringify({ action: 'username', username: document.getElementById('s-username').value.trim() }) });
+        toast('Username changed');
+        await loadMe(); await render();
+      } catch (err) { document.getElementById('username-error').textContent = err.message; }
+    });
+
+    document.getElementById('settings-password')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await api('/api/settings', {
+          method: 'POST',
+          body: JSON.stringify({ field: 'password', current_password: document.getElementById('s-current').value, new_password: document.getElementById('s-new').value })
+        });
+        toast('Password changed');
+        document.getElementById('s-current').value = '';
+        document.getElementById('s-new').value = '';
+      } catch (err) { document.getElementById('password-error').textContent = err.message; }
+    });
+
+    document.getElementById('settings-recovery')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const res = await api('/api/settings', { method: 'POST', body: JSON.stringify({ field: 'recovery', recoveryCode: document.getElementById('s-rec').value }) });
+        toast('Recovery code rotated');
+        if (res.recoveryCode) showRecoveryModal(res.recoveryCode);
+        document.getElementById('s-rec').value = '';
+      } catch (err) { document.getElementById('recovery-error').textContent = err.message; }
+    });
+
+    document.querySelectorAll('[data-revoke]').forEach((b) => {
+      b.addEventListener('click', async () => {
+        try {
+          await api('/api/account', { method: 'POST', body: JSON.stringify({ action: 'revoke', token_hash: b.dataset.revoke }) });
+          toast('Session revoked'); await render();
+        } catch (err) { toast(err.message, true); }
+      });
+    });
+
+    document.getElementById('revoke-others')?.addEventListener('click', async () => {
+      try {
+        await api('/api/account', { method: 'POST', body: JSON.stringify({ action: 'revoke_others' }) });
+        toast('Other devices logged out'); await render();
+      } catch (err) { toast(err.message, true); }
+    });
+
+    // privacy
+    document.getElementById('settings-privacy')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        await api('/api/account', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'prefs',
+            pm_policy: document.getElementById('s-pm-policy').value,
+            profile_hidden: document.getElementById('s-hidden').checked,
+            notify_reply: document.getElementById('s-ntf-reply').checked,
+            notify_mention: document.getElementById('s-ntf-mention').checked,
+            notify_reaction: document.getElementById('s-ntf-reaction').checked
+          })
+        });
+        toast('Preferences saved');
+      } catch (err) { document.getElementById('privacy-error').textContent = err.message; }
+    });
+
+    // danger: two-step delete
+    document.getElementById('settings-delete')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('delete-account-btn');
+
+      if (!btn.dataset.armed) {
+        btn.dataset.armed = '1';
+        btn.classList.add('confirm-arm');
+        btn.textContent = 'Click again to permanently delete';
+        setTimeout(() => { delete btn.dataset.armed; btn.classList.remove('confirm-arm'); btn.textContent = 'Delete my account'; }, 4000);
+        return;
+      }
+
+      try {
+        await api('/api/account', { method: 'POST', body: JSON.stringify({ action: 'delete', password: document.getElementById('s-del-pass').value }) });
+        state.me = null;
+        toast('Account deleted');
+        location.hash = '#/';
+        await loadMe(); await render();
+      } catch (err) { document.getElementById('delete-error').textContent = err.message; }
+    });
+  };
+}
