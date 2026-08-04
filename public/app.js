@@ -4761,3 +4761,46 @@ function bindAttachPicker(pid) {
 
   if (typeof renderAttachPreview === 'function') renderAttachPreview(pid);
 }
+// === PART 9: FINAL — 2MB upload ceiling ===
+
+function downscaleImage(file, maxDim = 1600, quality = 0.85) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const img = new Image();
+
+      img.onload = () => {
+        try {
+          let { width, height } = img;
+          const scale = Math.min(1, maxDim / Math.max(width, height));
+          width = Math.max(1, Math.round(width * scale));
+          height = Math.max(1, Math.round(height * scale));
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+
+          let q = quality;
+          let out = canvas.toDataURL('image/jpeg', q);
+
+          while (out.length > 2600000 && q > 0.35) {
+            q -= 0.1;
+            out = canvas.toDataURL('image/jpeg', q);
+          }
+
+          resolve(out);
+        } catch {
+          reject(new Error('Resize failed'));
+        }
+      };
+
+      img.onerror = () => reject(new Error('Bad image file'));
+      img.src = reader.result;
+    };
+
+    reader.onerror = () => reject(new Error('Read error'));
+    reader.readAsDataURL(file);
+  });
+}
