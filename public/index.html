@@ -6,10 +6,8 @@
   <title>PentHub — legal pentesting & hardware security forum</title>
   <meta name="description" content="PentHub — a forum for legal pentesters, CTF players, ESP32, Flipper Zero, defensive security and hardware security labs." />
   <meta name="theme-color" content="#0d1117" />
-  <meta property="og:title" content="PentHub" />
-  <meta property="og:description" content="Legal pentesting & hardware security forum." />
-  <meta property="og:type" content="website" />
   <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/extra.css" />
   <link rel="icon" href="/logo.svg" type="image/svg+xml" />
   <link rel="alternate" type="application/rss+xml" title="PentHub RSS" href="/api/rss" />
 </head>
@@ -38,10 +36,7 @@
 
   <footer class="footer">
     <div class="shell">
-      <p>
-        PentHub is a platform for legal research, education and defensive security.
-        Any actions outside the law or without written permission are prohibited.
-      </p>
+      <p>PentHub is a platform for legal research, education and defensive security. Any actions outside the law or without written permission are prohibited.</p>
       <p class="footer-links">
         <a href="#/terms">Terms</a> ·
         <a href="#/privacy">Privacy</a> ·
@@ -52,8 +47,6 @@
       </p>
     </div>
   </footer>
-
-  <div id="share-menu" class="share-menu hidden" role="dialog" aria-modal="true"></div>
 
   <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Report">
     <div class="modal-card">
@@ -76,6 +69,52 @@
         <button id="recovery-copy" class="btn ghost" type="button">Copy</button>
         <button id="recovery-close" class="btn" type="button">I saved it</button>
       </div>
+    </div>
+  </div>
+
+  <div id="ticket-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="New ticket">
+    <div class="modal-card">
+      <h3>New support ticket</h3>
+      <form id="ticket-modal-form" class="modal-form">
+        <label>Subject <input id="ticket-subject" class="input" required minlength="4" maxlength="100" /></label>
+        <label>Message <textarea id="ticket-body" required minlength="10" maxlength="5000"></textarea></label>
+        <div id="ticket-attach-slot"></div>
+        <div class="modal-actions">
+          <button type="button" id="ticket-modal-cancel" class="btn ghost">Cancel</button>
+          <button type="submit" class="btn">Submit ticket</button>
+        </div>
+        <div id="ticket-modal-error" class="form-error"></div>
+      </form>
+    </div>
+  </div>
+
+  <div id="ban-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Ban user">
+    <div class="modal-card">
+      <h3>Ban user</h3>
+      <p class="muted">The reason is shown to the user and stored in the audit log.</p>
+      <form id="ban-modal-form" class="modal-form">
+        <label>Reason <input id="ban-reason" class="input" required minlength="5" maxlength="500" placeholder="Violated platform rules" /></label>
+        <div class="modal-actions">
+          <button type="button" id="ban-modal-cancel" class="btn ghost">Cancel</button>
+          <button type="submit" class="btn danger">Ban</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div id="changelog-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="New changelog entry">
+    <div class="modal-card">
+      <h3>Publish changelog entry</h3>
+      <form id="changelog-modal-form" class="modal-form">
+        <label>Version <input id="cl-version" class="input" required maxlength="20" placeholder="1.2.0" /></label>
+        <label>Title <input id="cl-title" class="input" required maxlength="100" /></label>
+        <label>Body (markdown) <textarea id="cl-body" required maxlength="3000"></textarea></label>
+        <div class="modal-actions">
+          <button type="button" id="changelog-modal-cancel" class="btn ghost">Cancel</button>
+          <button type="submit" class="btn">Publish</button>
+        </div>
+        <div id="changelog-modal-error" class="form-error"></div>
+      </form>
     </div>
   </div>
 
