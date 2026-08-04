@@ -3036,3 +3036,325 @@ function bindAdminPage() {
       .catch((err) => toast(err.message, true));
   });
 }
+// === FIXES PART 3 (overrides) ===
+
+// 1) Share as inline dropdown, not a corner box
+function shareButtonHtml(url, title) {
+  return `
+    <div class="menu-wrap" data-share-url="${esc(url)}" data-share-title="${esc(title)}">
+      <button class="action" data-share-toggle>${ICONS.share} Share</button>
+      <div class="menu">
+        <button data-share-act="copy">Copy link</button>
+        <button data-share-act="twitter">Twitter / X</button>
+        <button data-share-act="reddit">Reddit</button>
+        <button data-share-act="hn">Hacker News</button>
+      </div>
+    </div>
+  `;
+}
+
+function attachShareHandlers() {
+  // handled by global delegation below
+}
+
+document.addEventListener('click', (e) => {
+  const toggle = e.target.closest('[data-share-toggle]');
+
+  if (toggle) {
+    e.stopPropagation();
+    const menu = toggle.parentElement.querySelector('.menu');
+    if (menu) openMenu(menu);
+    return;
+  }
+
+  const act = e.target.closest('[data-share-act]');
+
+  if (act) {
+    e.stopPropagation();
+    const wrap = act.closest('[data-share-url]');
+    const url = wrap?.dataset.shareUrl || location.href;
+    const title = wrap?.dataset.shareTitle || '';
+    const encoded = encodeURIComponent(url);
+    const t = encodeURIComponent(title);
+    const kind = act.dataset.shareAct;
+
+    if (kind === 'copy') {
+      navigator.clipboard?.writeText(url)
+        .then(() => toast('Link copied'))
+        .catch(() => toast('Copy failed', true));
+    } else if (kind === 'twitter') {
+      window.open(`https://twitter.com/intent/tweet?text=${t}&url=${encoded}`, '_blank', 'noopener');
+    } else if (kind === 'reddit') {
+      window.open(`https://www.reddit.com/submit?url=${encoded}&title=${t}`, '_blank', 'noopener');
+    } else if (kind === 'hn') {
+      window.open(`https://news.ycombinator.com/submitlink?u=${encoded}&t=${t}`, '_blank', 'noopener');
+    }
+
+    closeMenus();
+  }
+});
+
+// 10) smaller sidebar + 9) Forum button
+function updateSidebar() {
+  if (!sidebar) return;
+
+  const ntf = Number(state.me?.notifications_unread || 0);
+  const pm = Number(state.me?.unread_count || 0);
+  const active = location.hash.replace(/^#\/?/, '').split('?')[0];
+
+  const main = [
+    { href: '', label: 'Home', icon: ICONS.home },
+    { href: 'forum', label: 'Forum', icon: ICONS.book },
+    { href: 'categories', label: 'Categories', icon: ICONS.grid },
+    { href: 'learn', label: 'Learn', icon: ICONS.grad },
+    { href: 'firmware', label: 'Firmware', icon: ICONS.shield },
+    { href: 'rules', label: 'Rules', icon: ICONS.book },
+    { href: 'support', label: 'Support', icon: ICONS.help }
+  ];
+
+  const account = [
+    state.me ? { href: 'notifications', label: 'Notifications', icon: ICONS.bell, count: ntf } : null,
+    state.me ? { href: 'messages', label: 'Messages', icon: ICONS.mail, count: pm } : null,
+    state.me ? { href: `user/${encodeURIComponent(state.me.username)}`, label: 'Profile', icon: ICONS.user } : null,
+    state.me ? { href: 'settings', label: 'Settings', icon: ICONS.settings } : null,
+    isStaff() ? { href: 'admin', label: 'Admin', icon: ICONS.shield } : null,
+    state.me ? { href: '__logout__', label: 'Log out', icon: '✕', danger: true } : null
+  ].filter(Boolean);
+
+  const sideItem = (item) => {
+    const isActive = active === item.href || (item.href && active.startsWith(item.href + '/'));
+    const cls = `side-item ${isActive ? 'active' : ''} ${item.danger ? 'danger' : ''}`;
+    const count = item.count ? `<span class="side-count">${item.count}</span>` : '';
+
+    if (item.href === '__logout__') {
+      return `<button class="${cls}" data-logout="1">${item.icon}<span>${item.label}</span>${count}</button>`;
+    }
+
+    return `<a class="${cls}" href="#/${item.href}">${item.icon}<span>${item.label}</span>${count}</a>`;
+  };
+
+  sidebar.innerHTML = `
+    ${main.map(sideItem).join('')}
+    ${account.length ? '<div class="side-section">Account</div>' : ''}
+    ${account.map(sideItem).join('')}
+  `;
+
+  sidebar.querySelectorAll('[data-logout]').forEach((b) => b.addEventListener('click', logout));
+}
+
+// 9) Home = personal dashboard; forum feed moved to #/forum
+function renderHome() {
+  return async function homeView() {
+    if (!state.me) {
+      await renderWelcome()();
+      return;
+    }
+
+    const [p1, p2, rel] = await Promise.all([
+      api('/api/threads?page=1'),
+      api('/api/threads?page=2').catch(() => ({ threads: [] })),
+      api('/api/releases').catch(() => ({ releases: [] }))
+    ]);
+
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const topWeek = [...(p1.threads || []), ...(p2.threads || [])]
+      .filter((t) => t.updated_at > weekAgo)
+      .sort((a, b) => Number(b.post_count || 0) - Number(a.post_count || 0))
+      .slice(0, 5);
+
+    const releases = (rel.releases || []).slice(0, 4);
+
+    app.innerHTML = `
+      <section class="welcome-hero" style="text-align:left;padding:22px;animation:rise .4s ease both">
+        <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+          ${avatarHtml(state.me.username, '', state.me.avatar || '')}
+          <div style="flex:1;min-width:200px">
+            <h1 style="font-size:1.3rem;margin:0">Hey, ${esc(state.me.display_name || state.me.username)}</h1>
+            <p style="margin:4px 0 0">Your security community dashboard.</p>
+          </div>
+          <div class="top-actions">
+            <a class="btn small" href="#/new-thread">+ New thread</a>
+            <a class="btn ghost small" href="#/forum">Open forum</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="page-head"><h2>Top threads this week</h2></section>
+      ${topWeek.length ? topWeek.map(threadRowHtml).join('') : '<section class="empty">No activity this week yet.</section>'}
+
+      <section class="page-head" style="margin-top:20px"><h2>Popular projects</h2></section>
+      <div class="feature-grid">
+        ${releases.map((r) => `
+          <a class="feature-card" href="${esc(r.url)}" target="_blank" rel="noopener">
+            <h3>${esc(r.source)} ${esc(r.tag)}</h3>
+            <p>${esc((r.title || '').slice(0, 80))}</p>
+          </a>
+        `).join('') || `
+          <a class="feature-card" href="#/firmware"><h3>Firmware Hub</h3><p>Releases will appear once the sync cron runs.</p></a>
+        `}
+        <a class="feature-card" href="#/firmware/bruce/wiki"><h3>Bruce wiki index</h3><p>Curated summaries with links to the official wiki.</p></a>
+      </div>
+
+      <section class="page-head" style="margin-top:20px"><h2>Useful links</h2></section>
+      <div class="feature-grid">
+        <a class="feature-card" href="#/learn"><h3>Learn</h3><p>Original training articles: labs, CTF path, UART/JTAG, disclosure.</p></a>
+        <a class="feature-card" href="#/rules"><h3>Rules</h3><p>What is allowed and what gets you banned.</p></a>
+        <a class="feature-card" href="#/support"><h3>Support</h3><p>Tickets for account issues and questions.</p></a>
+        <a class="feature-card" href="/api/rss" ><h3>RSS</h3><p>Follow new threads in your reader.</p></a>
+      </div>
+    `;
+
+    attachShareHandlers(app);
+  };
+}
+
+function renderForum(query) {
+  return async function forumView() {
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+    const data = await api(`/api/threads?page=${page}`);
+    const threads = data.threads || [];
+
+    app.innerHTML = `
+      ${state.me ? `
+        <div class="composer">
+          ${avatarHtml(state.me.username, '', state.me.avatar || '')}
+          <a class="fake" href="#/new-thread">Share a legal finding, lab report or question...</a>
+          <a class="btn small" href="#/new-thread">Post</a>
+        </div>
+      ` : `
+        <div class="notice info">
+          Welcome to PentHub — a forum for legal pentesting, hardware labs, CTF and defensive security.
+          <a href="#/register">Join</a> to post. <a href="#/rules">Rules</a>.
+        </div>
+      `}
+
+      <section class="page-head">
+        <h2>Latest threads</h2>
+        ${shareButtonHtml(`${location.origin}/#/forum`, 'PentHub forum')}
+      </section>
+
+      ${threads.length ? threads.map(threadRowHtml).join('') : '<section class="empty">No threads yet.</section>'}
+
+      ${paginationHtml('#/forum', page, Boolean(data.hasMore))}
+    `;
+
+    attachShareHandlers(app);
+  };
+}
+
+// 6) Welcome: guests only, more attractive
+function renderWelcome() {
+  return async function welcomeView() {
+    if (state.me) { location.hash = '#/'; return; }
+
+    const totalThreads = state.categories.reduce((a, c) => a + Number(c.thread_count || 0), 0);
+
+    app.innerHTML = `
+      <section class="welcome-hero">
+        <img class="welcome-logo" src="/logo.svg" alt="PentHub logo" />
+        <h1>The home of legal hardware hacking</h1>
+        <p>
+          PentHub is a community for <strong>authorized</strong> security research:
+          ESP32 & Flipper Zero labs, CTF training, defensive security and firmware deep-dives.
+        </p>
+        <p class="muted">${state.categories.length} categories · ${totalThreads} threads · original training articles · auto-synced firmware releases</p>
+        <div class="admin-controls" style="justify-content:center">
+          <a class="btn" href="#/register">Create account</a>
+          <a class="btn blue" href="#/login">Log in</a>
+          <a class="btn ghost" href="#/forum">Browse forum</a>
+        </div>
+      </section>
+
+      <section class="feature-grid">
+        <a class="feature-card" href="#/learn">
+          <h3>Learn by doing</h3>
+          <p>Home Wi-Fi labs, CTF path, UART/JTAG basics, responsible disclosure — original articles.</p>
+        </a>
+        <a class="feature-card" href="#/firmware">
+          <h3>Firmware Hub</h3>
+          <p>Bruce & friends: releases auto-synced from GitHub with discussion threads.</p>
+        </a>
+        <a class="feature-card" href="#/categories">
+          <h3>Pick your lane</h3>
+          <p>Firmwares, Hardwares, Networks, Research, Training — find your community.</p>
+        </a>
+        <a class="feature-card" href="#/rules">
+          <h3>Safe by design</h3>
+          <p>Authorized research only. Reports, appeals, audits and transparent moderation.</p>
+        </a>
+      </section>
+
+      <section class="card" style="text-align:center">
+        <h2 style="margin-top:0">Why people join</h2>
+        <p class="muted">
+          “Finally a place where ESP32 tinkerers, CTF players and professional pentesters
+          talk shop without stepping over the legal line.”
+        </p>
+        <div class="admin-controls" style="justify-content:center">
+          <a class="btn" href="#/register">Join PentHub — it's free</a>
+        </div>
+      </section>
+    `;
+  };
+}
+
+// 2) fixed router: settings gets query, forum route added
+async function render() {
+  const { segments, query } = parseRoute();
+
+  app.innerHTML = '<div class="loading">Loading...</div>';
+
+  updateSidebar();
+  updateRightbar();
+
+  try {
+    const section = segments[0] || '';
+
+    if (!section) await renderHome()();
+    else if (section === 'welcome') await renderWelcome()();
+    else if (section === 'forum') await renderForum(query)();
+    else if (section === 'categories') await renderCategories()();
+    else if (section === 'section') await renderSection(segments[1], query)();
+    else if (section === 'category') await renderCategory(segments[1], query)();
+    else if (section === 'tag') await renderTag(segments[1], query)();
+    else if (section === 'thread') await renderThread(segments[1], query)();
+    else if (section === 'user') await renderProfile(segments[1], query)();
+    else if (section === 'notifications') await renderNotifications(query)();
+    else if (section === 'messages') {
+      if (segments[1] === 'user') await renderConversation(segments[2], query)();
+      else if (segments[1] === 'new') renderNewMessage(query)();
+      else await renderMessages(query)();
+    }
+    else if (section === 'settings') await renderSettings(query)();
+    else if (section === 'support') await renderSupport(query)();
+    else if (section === 'ticket') await renderTicket(Number(segments[1]))();
+    else if (section === 'appeal') await renderAppeal()();
+    else if (section === 'changelog') await renderChangelog(query)();
+    else if (section === 'learn') await renderLearn(segments[1])();
+    else if (section === 'firmware') {
+      if (segments[1] === 'bruce' && segments[2] === 'wiki') await renderBruceWiki()();
+      else await renderFirmwareHub()();
+    }
+    else if (section === 'releases') await renderReleases()();
+    else if (section === 'login') renderLogin()();
+    else if (section === 'register') renderRegister()();
+    else if (section === 'recover') renderRecover()();
+    else if (section === 'new-thread') await renderNewThread(query)();
+    else if (section === 'search') await renderSearch(query)();
+    else if (section === 'rules') renderRules()();
+    else if (section === 'terms') renderTerms()();
+    else if (section === 'privacy') renderPrivacy()();
+    else if (section === 'admin') await renderAdmin(query)();
+    else renderNotFound()();
+  } catch (error) {
+    app.innerHTML = `
+      <section class="card narrow">
+        <h1>Error</h1>
+        <p class="error">${esc(error.message)}</p>
+        <p><a href="#/">Back home</a></p>
+      </section>
+    `;
+  }
+
+  updateTopbar();
+}
