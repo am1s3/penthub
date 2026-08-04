@@ -12,6 +12,20 @@ import {
   verifyTurnstile
 } from '../../_utils.js';
 
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) {
+    return false;
+  }
+
+  let diff = 0;
+
+  for (let i = 0; i < a.length; i += 1) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+
+  return diff === 0;
+}
+
 export async function onRequest({ request, env }) {
   if (request.method !== 'POST') {
     return json({ error: 'Method not allowed' }, 405);
@@ -26,7 +40,7 @@ export async function onRequest({ request, env }) {
   try {
     body = await readJson(request);
   } catch {
-    return json({ error: 'Некорректный JSON' }, 400);
+    return json({ error: 'Invalid JSON' }, 400);
   }
 
   const username = cleanText(body.username, 32, false) || '';
@@ -34,11 +48,11 @@ export async function onRequest({ request, env }) {
   const ip = getClientIp(request);
 
   if (!(await rateLimit(env, `login:${ip}:${username.toLowerCase()}`, 10, 3600))) {
-    return json({ error: 'Слишком много попыток входа. Попробуй позже.' }, 429);
+    return json({ error: 'Too many login attempts. Try later.' }, 429);
   }
 
   if (!(await verifyTurnstile(env, request, body.turnstileToken))) {
-    return json({ error: 'Проверка не пройдена. Обнови страницу и попробуй снова.' }, 400);
+    return json({ error: 'Verification failed. Refresh the page and try again.' }, 400);
   }
 
   try {
@@ -51,12 +65,12 @@ export async function onRequest({ request, env }) {
     if (!user) {
       await hashPassword(password || 'invalid-password', randomHex(16));
 
-      return json({ error: 'Неверный логин или пароль' }, 401);
+      return json({ error: 'Invalid username or password' }, 401);
     }
 
     const candidateHash = await hashPassword(password, user.salt);
 
-    if (candidateHash !== user.password_hash) {
+    if (!safeEqual(candidateHash, user.password_hash)) {
       await audit(env, {
         userId: user.id,
         action: 'login_failed',
@@ -64,11 +78,11 @@ export async function onRequest({ request, env }) {
         details: user.username
       });
 
-      return json({ error: 'Неверный логин или пароль' }, 401);
+      return json({ error: 'Invalid username or password' }, 401);
     }
 
     if (user.banned) {
-      return json({ error: 'Аккаунт заблокирован' }, 403);
+      return json({ error: 'Account is banned' }, 403);
     }
 
     await audit(env, {
@@ -90,6 +104,6 @@ export async function onRequest({ request, env }) {
       { 'Set-Cookie': cookie }
     );
   } catch {
-    return json({ error: 'Внутренняя ошибка' }, 500);
+    return json({ error: 'Internal error' }, 500);
   }
 }
