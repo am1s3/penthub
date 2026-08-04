@@ -119,6 +119,62 @@ async function handleGet(request, env) {
       return json({ users, page, perPage: PER_PAGE, hasMore: users.length === PER_PAGE });
     }
 
+    if (type === 'audit') {
+      if (!user.isAdmin) {
+        return json({ error: 'Журнал — только админ' }, 403);
+      }
+
+      const result = await env.DB.prepare(
+        `
+          SELECT
+            a.id,
+            a.action,
+            a.ip,
+            a.details,
+            a.created_at,
+            u.username
+          FROM audit_logs a
+          LEFT JOIN users u ON u.id = a.user_id
+          ORDER BY a.created_at DESC
+          LIMIT ? OFFSET ?
+        `
+      )
+        .bind(PER_PAGE, offset)
+        .all();
+
+      const logs = result.results || [];
+
+      return json({ logs, page, perPage: PER_PAGE, hasMore: logs.length === PER_PAGE });
+    }
+
+    if (type === 'export') {
+      if (!user.isAdmin) {
+        return json({ error: 'Экспорт — только админ' }, 403);
+      }
+
+      if (!(await rateLimit(env, `export:${user.id}`, 3, 3600))) {
+        return json({ error: 'Экспорт ограничен: 3 раза в час' }, 429);
+      }
+
+      const [categories, users, threads, posts, reports] = await Promise.all([
+        env.DB.prepare('SELECT id, slug, name, description, sort_order FROM categories ORDER BY id').all(),
+        env.DB.prepare('SELECT id, username, created_at, banned, is_admin, is_moderator FROM users ORDER BY id').all(),
+        env.DB.prepare('SELECT id, category_id, user_id, title, created_at, updated_at, is_locked, is_pinned, deleted FROM threads ORDER BY id').all(),
+        env.DB.prepare('SELECT id, thread_id, user_id, body, created_at, updated_at, deleted FROM posts ORDER BY id').all(),
+        env.DB.prepare('SELECT id, post_id, reporter_id, reason, status, created_at FROM reports ORDER BY id').all()
+      ]);
+
+      return json({
+        exported_at: new Date().toISOString(),
+        source: 'PentHub',
+        categories: categories.results || [],
+        users: users.results || [],
+        threads: threads.results || [],
+        posts: posts.results || [],
+        reports: reports.results || []
+      });
+    }
+
     return json({ error: 'Неизвестный type' }, 400);
   } catch {
     return json({ error: 'Внутренняя ошибка' }, 500);
@@ -175,7 +231,7 @@ async function handlePost(request, env) {
       const row = await env.DB.prepare('SELECT id FROM posts WHERE id = ?').bind(id).first();
       if (!row) return json({ error: 'Пост не найден' }, 404);
 
-      await env.DB.prepare(`UPDATE posts SET deleted = ? WHERE id = ?`)
+      await env.DB.prepare('UPDATE posts SET deleted = ? WHERE id = ?')
         .bind(action === 'delete' ? 1 : 0, id)
         .run();
     } else if (type === 'report') {
