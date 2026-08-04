@@ -1,0 +1,51 @@
+.attach-grid {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.attach-grid a img,
+.attach-item img {
+  width: 96px;
+  height: 96px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  display: block;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.attach-grid a:hover img {
+  transform: scale(1.05);
+  border-color: var(--blue);
+}
+
+.attach-item { position: relative; display: inline-block; }
+
+.attach-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--danger);
+  font-size: 11px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.attach-remove:hover { background: var(--danger); color: #fff; }
+
+.modal-form { display: grid; gap: 12px; margin-top: 8px; }
+
+.btn.confirm-arm {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: rgba(248, 81, 73, 0.15);
+}
