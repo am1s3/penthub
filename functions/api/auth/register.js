@@ -29,7 +29,7 @@ export async function onRequest({ request, env }) {
   const ip = getClientIp(request);
 
   if (!(await rateLimit(env, `register:${ip}`, 5, 3600))) {
-    return json({ error: 'Слишком много попыток регистрации. Попробуй позже.' }, 429);
+    return json({ error: 'Too many registration attempts. Try later.' }, 429);
   }
 
   let body;
@@ -37,11 +37,11 @@ export async function onRequest({ request, env }) {
   try {
     body = await readJson(request);
   } catch {
-    return json({ error: 'Некорректный JSON' }, 400);
+    return json({ error: 'Invalid JSON' }, 400);
   }
 
   if (!(await verifyTurnstile(env, request, body.turnstileToken))) {
-    return json({ error: 'Проверка не пройдена. Обнови страницу и попробуй снова.' }, 400);
+    return json({ error: 'Verification failed. Refresh the page and try again.' }, 400);
   }
 
   const username = cleanText(body.username, 32, false);
@@ -50,18 +50,18 @@ export async function onRequest({ request, env }) {
 
   if (!validUsername(username)) {
     return json({
-      error: 'Ник: 3-32 символа, только латиница, цифры, точка, подчёркивание и дефис.'
+      error: 'Username: 3-32 chars, latin letters, digits, dot, underscore or dash only.'
     }, 400);
   }
 
   if (!validPassword(password)) {
     return json({
-      error: 'Пароль должен быть 12-128 символов и содержать буквы и цифры.'
+      error: 'Password must be 12-128 characters and contain letters and digits.'
     }, 400);
   }
 
   if (!acceptTerms) {
-    return json({ error: 'Нужно принять правила и юридическое соглашение.' }, 400);
+    return json({ error: 'You must accept the rules and the legal agreement.' }, 400);
   }
 
   try {
@@ -70,7 +70,7 @@ export async function onRequest({ request, env }) {
       .first();
 
     if (existing) {
-      return json({ error: 'Ник уже занят' }, 409);
+      return json({ error: 'Username is already taken' }, 409);
     }
 
     const userCount = await env.DB.prepare('SELECT COUNT(*) AS c FROM users').first();
@@ -104,7 +104,7 @@ export async function onRequest({ request, env }) {
       .first();
 
     if (!inserted) {
-      return json({ error: 'Не удалось создать пользователя' }, 500);
+      return json({ error: 'Failed to create user' }, 500);
     }
 
     await audit(env, {
@@ -127,6 +127,6 @@ export async function onRequest({ request, env }) {
       { 'Set-Cookie': cookie }
     );
   } catch {
-    return json({ error: 'Внутренняя ошибка' }, 500);
+    return json({ error: 'Internal error' }, 500);
   }
 }
