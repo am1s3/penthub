@@ -4559,3 +4559,121 @@ function renderWelcome() {
     `;
   };
 }
+// === PART 7: FINAL — attachments render guarantee (must stay last) ===
+
+function attachmentsHtml(list) {
+  if (!list || !list.length) return '';
+  return `
+    <div class="attach-grid">
+      ${list.map((u) => `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="attachment"></a>`).join('')}
+    </div>
+  `;
+}
+
+function postHtml(post) {
+  const edited = post.updated_at > post.created_at ? '<span class="edited">(edited)</span>' : '';
+
+  return `
+    <article class="post" id="post-${post.id}">
+      ${avatarHtml(post.username, '', post.avatar || '')}
+      <div class="post-main">
+        <div class="feed-head">
+          <span class="feed-name">${userLink(post)}</span>
+          ${badgesHtml(post.badges, post)}
+          <span class="muted">· ${time(post.created_at)} ${edited}</span>
+        </div>
+        <div class="post-body">${mdToHtml(post.body)}</div>
+        ${attachmentsHtml(post.attachments)}
+        ${state.me ? reactionsHtml(post) : ''}
+        ${actionBarHtml(post)}
+      </div>
+    </article>
+  `;
+}
+
+function renderThread(id, query) {
+  return async function threadView() {
+    const threadId = Number(id);
+    if (!Number.isInteger(threadId)) throw new Error('Invalid thread');
+
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+
+    const [{ thread }, postsData] = await Promise.all([
+      api(`/api/thread?id=${threadId}`),
+      api(`/api/posts?threadId=${threadId}&page=${page}`)
+    ]);
+
+    const posts = postsData.posts || [];
+    const base = `#/thread/${threadId}`;
+
+    const replyInner = (!state.me)
+      ? `<p class="notice"><a href="#/login">Log in</a> to reply.</p>`
+      : (thread.is_locked && !isStaff())
+        ? `<p class="notice warn">Thread is locked.</p>`
+        : `
+          <form id="reply-form" class="form">
+            <label>Reply <textarea id="reply-body" maxlength="10000" required minlength="1"></textarea></label>
+            ${typeof attachPickerHtml === 'function' ? attachPickerHtml('reply') : ''}
+            <button class="btn" type="submit">Reply</button>
+            <div id="reply-error" class="form-error"></div>
+          </form>
+        `;
+
+    app.innerHTML = `
+      <section class="page-head">
+        <div>
+          <h1>${esc(thread.title)}</h1>
+          <div class="feed-tags">
+            <a class="chip" href="#/category/${encodeURIComponent(thread.category_slug)}">${esc(thread.category_name)}</a>
+            ${(thread.tags || []).map((tag) => `<a class="chip tag" href="#/tag/${encodeURIComponent(tag)}">#${esc(tag)}</a>`).join('')}
+            <span class="muted">by ${userLink(thread)} · ${time(thread.created_at)}</span>
+          </div>
+        </div>
+        <div class="top-actions">
+          ${shareButtonHtml(`${location.origin}/#/thread/${threadId}`, thread.title)}
+          ${threadAdminHtml(thread)}
+        </div>
+      </section>
+
+      <section>${posts.map(postHtml).join('')}</section>
+
+      ${paginationHtml(base, page, Boolean(postsData.hasMore))}
+
+      <section class="card">
+        <h2>Reply</h2>
+        ${replyInner}
+      </section>
+    `;
+
+    if (typeof bindAttachPicker === 'function') bindAttachPicker('reply');
+
+    bindThreadPage(thread, posts);
+    attachShareHandlers(app);
+
+    const replyForm = document.getElementById('reply-form');
+
+    if (replyForm) {
+      replyForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const errorEl = document.getElementById('reply-error');
+
+        try {
+          await api('/api/posts', {
+            method: 'POST',
+            body: JSON.stringify({
+              threadId: thread.id,
+              body: document.getElementById('reply-body').value,
+              attachments: (typeof attachStore !== 'undefined' && attachStore['reply']) || []
+            })
+          });
+
+          if (typeof attachStore !== 'undefined') attachStore['reply'] = [];
+          toast('Reply published');
+          await render();
+        } catch (error) {
+          errorEl.textContent = error.message;
+        }
+      });
+    }
+  };
+}
