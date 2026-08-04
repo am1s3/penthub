@@ -1,6 +1,6 @@
 import { json, readJson, checkOrigin, getSessionUser, rateLimit, randomHex } from '../_utils.js';
 
-const MAX_BYTES = 1500000;
+const MAX_BYTES = 300000;
 
 export async function onRequest({ request, env }) {
   if (request.method !== 'POST') {
@@ -18,13 +18,9 @@ export async function onRequest({ request, env }) {
     return json({ error: 'Too many uploads per hour' }, 429);
   }
 
-  if (!env.FILES) {
-    return json({ error: 'File storage not configured: add R2 binding named FILES and redeploy' }, 500);
-  }
-
   let body;
   try {
-    body = await readJson(request, 2500000);
+    body = await readJson(request, 1200000);
   } catch {
     return json({ error: 'Invalid JSON' }, 400);
   }
@@ -40,7 +36,7 @@ export async function onRequest({ request, env }) {
   }
 
   if (bin.length > MAX_BYTES) {
-    return json({ error: 'Image too big (max 1.5MB)' }, 400);
+    return json({ error: 'Image too big (max 300KB)' }, 400);
   }
 
   const bytes = new Uint8Array(bin.length);
@@ -49,8 +45,10 @@ export async function onRequest({ request, env }) {
   const key = `${Date.now()}-${randomHex(6)}`;
 
   try {
-    await env.FILES.put(key, bytes, { httpMetadata: { contentType: m[1] } });
-  } catch (e) {
+    await env.DB.prepare('INSERT INTO files (key, mime, data, created_at) VALUES (?, ?, ?, ?)')
+      .bind(key, m[1], bytes.buffer, Date.now())
+      .run();
+  } catch {
     return json({ error: 'Storage write failed' }, 500);
   }
 
