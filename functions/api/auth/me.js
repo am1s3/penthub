@@ -1,7 +1,4 @@
-import {
-  json,
-  getSessionUser
-} from '../../_utils.js';
+import { json, getSessionUser } from '../../_utils.js';
 
 export async function onRequest({ request, env }) {
   if (request.method !== 'GET') {
@@ -15,8 +12,14 @@ export async function onRequest({ request, env }) {
       return json({ error: 'Unauthorized' }, 401);
     }
 
-    return json(user);
+    const unread = await env.DB.prepare(
+      'SELECT COUNT(*) AS c FROM private_messages WHERE recipient_id = ? AND read_at IS NULL'
+    )
+      .bind(user.id)
+      .first();
+
+    return json({ ...user, unread_count: Number(unread?.c || 0) });
   } catch {
-    return json({ error: 'Внутренняя ошибка' }, 500);
+    return json({ error: 'Internal error' }, 500);
   }
 }
