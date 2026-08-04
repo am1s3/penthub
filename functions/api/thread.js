@@ -1,4 +1,5 @@
 import { json } from '../_utils.js';
+import { attachTags } from './threads.js';
 
 export async function onRequest({ request, env }) {
   if (request.method !== 'GET') {
@@ -43,9 +44,11 @@ export async function onRequest({ request, env }) {
       return json({ error: 'Thread not found' }, 404);
     }
 
+    const [withTags] = await attachTags(env, [thread]);
+
     return json({
       thread: {
-        ...thread,
+        ...withTags,
         is_locked: Boolean(thread.is_locked),
         is_pinned: Boolean(thread.is_pinned)
       }
