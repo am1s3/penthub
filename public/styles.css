@@ -159,7 +159,8 @@ select:focus {
 .category-card,
 .thread,
 .post,
-.modal-card {
+.modal-card,
+.admin-row {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -168,7 +169,8 @@ select:focus {
 .card,
 .category-card,
 .thread,
-.post {
+.post,
+.admin-row {
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.12);
 }
 
@@ -414,6 +416,55 @@ textarea {
   gap: 8px;
   flex-wrap: wrap;
   margin: 12px 0;
+}
+
+.tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.tab {
+  padding: 8px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.tab:hover {
+  text-decoration: none;
+  color: var(--text);
+}
+
+.tab.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(34, 211, 165, 0.08);
+}
+
+.admin-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.admin-row {
+  padding: 16px;
+}
+
+.admin-row-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.report-reason {
+  margin: 6px 0;
+  font-weight: 600;
 }
 
 .modal {
