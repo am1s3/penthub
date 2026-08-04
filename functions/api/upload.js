@@ -1,6 +1,6 @@
 import { json, checkOrigin, getSessionUser, rateLimit, randomHex } from '../_utils.js';
 
-const MAX_BYTES = 900000;
+const MAX_BYTES = 2000000;
 
 export async function onRequest({ request, env }) {
   if (request.method !== 'POST') {
@@ -42,7 +42,7 @@ export async function onRequest({ request, env }) {
   }
 
   if (bin.length > MAX_BYTES) {
-    return json({ error: 'Image too big after resize (max 900KB)' }, 400);
+    return json({ error: 'Image too big after resize (max 2MB)' }, 400);
   }
 
   const bytes = new Uint8Array(bin.length);
