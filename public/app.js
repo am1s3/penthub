@@ -1321,3 +1321,1718 @@ window.addEventListener('hashchange', render);
   updateTopbar();
   await render();
 })();
+// === SETTINGS (redesigned, tabs) ===
+
+function fileToDataURL(file, maxSize) {
+  return new Promise((resolve, reject) => {
+    if (!file) return reject(new Error('No file selected'));
+    if (file.size > maxSize) return reject(new Error(`File too big (${Math.round(file.size / 1024)}KB)`));
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('Read error'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderSettings(query) {
+  return async function settingsView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const tab = ['appearance', 'security'].includes(query.get('tab')) ? query.get('tab') : 'profile';
+    const data = await api('/api/settings');
+    const p = data.profile;
+
+    let content = '';
+
+    if (tab === 'profile') {
+      content = `
+        <form id="settings-profile" class="form">
+          <label>Display name <input id="s-display" class="input" maxlength="40" value="${esc(p.display_name || '')}" placeholder="How others see you" /></label>
+          <label>Username <input class="input" value="@${esc(p.username)}" disabled /></label>
+          <label>Bio <textarea id="s-bio" maxlength="500">${esc(p.bio || '')}</textarea></label>
+          <button class="btn small" type="submit">Save profile</button>
+          <div id="profile-error" class="form-error"></div>
+        </form>
+      `;
+    } else if (tab === 'appearance') {
+      content = `
+        <h2>Avatar</h2>
+        <div class="image-upload">
+          <div class="preview" id="s-avatar-preview">
+            ${p.avatar ? `<img src="${esc(p.avatar)}" alt="">` : avatarHtml(p.username)}
+          </div>
+          <input type="file" id="s-avatar-file" accept="image/png,image/jpeg,image/webp,image/gif" />
+          <button class="btn small" type="button" id="s-avatar-upload">Upload</button>
+          <button class="btn ghost small" type="button" id="s-avatar-clear">Remove</button>
+        </div>
+        <p class="muted">PNG / JPEG / WebP / GIF, up to 256KB.</p>
+
+        <h2>Banner</h2>
+        <div class="image-upload">
+          <div class="preview banner" id="s-banner-preview" ${p.banner ? `style="background-image:url('${esc(p.banner)}')"` : ''}></div>
+          <input type="file" id="s-banner-file" accept="image/png,image/jpeg,image/webp" />
+          <button class="btn small" type="button" id="s-banner-upload">Upload</button>
+          <button class="btn ghost small" type="button" id="s-banner-clear">Remove</button>
+        </div>
+        <p class="muted">PNG / JPEG / WebP, up to 512KB. Shown on your profile.</p>
+      `;
+    } else {
+      content = `
+        <h2>Change password</h2>
+        <form id="settings-password" class="form">
+          <label>Current password <input id="s-current" class="input" type="password" required /></label>
+          <label>New password <input id="s-new" class="input" type="password" required minlength="12" maxlength="128" /></label>
+          <button class="btn small" type="submit">Change password</button>
+          <div id="password-error" class="form-error"></div>
+        </form>
+
+        <h2>Recovery code</h2>
+        <p class="muted">Rotate your recovery code. The old one stops working immediately.</p>
+        <form id="settings-recovery" class="form">
+          <label>Current recovery code <input id="s-rec" class="input" autocomplete="off" required placeholder="PH-XXXX-XXXX-XXXX-XXXX" /></label>
+          <button class="btn small" type="submit">Rotate recovery code</button>
+          <div id="recovery-error" class="form-error"></div>
+        </form>
+      `;
+    }
+
+    app.innerHTML = `
+      <section class="page-head"><h1>Settings</h1></section>
+
+      <div class="settings-grid">
+        <nav class="settings-nav">
+          <a class="tab ${tab === 'profile' ? 'active' : ''}" href="#/settings?tab=profile">Profile</a>
+          <a class="tab ${tab === 'appearance' ? 'active' : ''}" href="#/settings?tab=appearance">Appearance</a>
+          <a class="tab ${tab === 'security' ? 'active' : ''}" href="#/settings?tab=security">Security</a>
+        </nav>
+
+        <div class="card" style="margin-bottom:0">
+          ${content}
+        </div>
+      </div>
+    `;
+
+    const profileForm = document.getElementById('settings-profile');
+
+    if (profileForm) {
+      profileForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const errorEl = document.getElementById('profile-error');
+
+        try {
+          await api('/api/settings', {
+            method: 'POST',
+            body: JSON.stringify({
+              field: 'profile',
+              display_name: document.getElementById('s-display').value,
+              bio: document.getElementById('s-bio').value
+            })
+          });
+          toast('Profile saved');
+          await loadMe();
+        } catch (error) {
+          errorEl.textContent = error.message;
+        }
+      });
+    }
+
+    const avatarUpload = document.getElementById('s-avatar-upload');
+
+    if (avatarUpload) {
+      avatarUpload.addEventListener('click', async () => {
+        try {
+          const file = document.getElementById('s-avatar-file').files[0];
+          const dataUrl = await fileToDataURL(file, 262144);
+          await api('/api/settings', { method: 'POST', body: JSON.stringify({ field: 'avatar', avatar: dataUrl }) });
+          document.getElementById('s-avatar-preview').innerHTML = `<img src="${esc(dataUrl)}" alt="">`;
+          toast('Avatar updated');
+          await loadMe();
+        } catch (error) {
+          toast(error.message, true);
+        }
+      });
+
+      document.getElementById('s-avatar-clear').addEventListener('click', async () => {
+        try {
+          await api('/api/settings', { method: 'POST', body: JSON.stringify({ field: 'avatar', avatar: '' }) });
+          toast('Avatar removed');
+          await render();
+        } catch (error) {
+          toast(error.message, true);
+        }
+      });
+
+      document.getElementById('s-banner-upload').addEventListener('click', async () => {
+        try {
+          const file = document.getElementById('s-banner-file').files[0];
+          const dataUrl = await fileToDataURL(file, 524288);
+          await api('/api/settings', { method: 'POST', body: JSON.stringify({ field: 'banner', banner: dataUrl }) });
+          document.getElementById('s-banner-preview').style.backgroundImage = `url('${dataUrl}')`;
+          toast('Banner updated');
+          await loadMe();
+        } catch (error) {
+          toast(error.message, true);
+        }
+      });
+
+      document.getElementById('s-banner-clear').addEventListener('click', async () => {
+        try {
+          await api('/api/settings', { method: 'POST', body: JSON.stringify({ field: 'banner', banner: '' }) });
+          toast('Banner removed');
+          await render();
+        } catch (error) {
+          toast(error.message, true);
+        }
+      });
+    }
+
+    const passwordForm = document.getElementById('settings-password');
+
+    if (passwordForm) {
+      passwordForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const errorEl = document.getElementById('password-error');
+
+        try {
+          await api('/api/settings', {
+            method: 'POST',
+            body: JSON.stringify({
+              field: 'password',
+              current_password: document.getElementById('s-current').value,
+              new_password: document.getElementById('s-new').value
+            })
+          });
+          toast('Password changed');
+          document.getElementById('s-current').value = '';
+          document.getElementById('s-new').value = '';
+        } catch (error) {
+          errorEl.textContent = error.message;
+        }
+      });
+
+      document.getElementById('settings-recovery').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const errorEl = document.getElementById('recovery-error');
+
+        try {
+          const res = await api('/api/settings', {
+            method: 'POST',
+            body: JSON.stringify({ field: 'recovery', recoveryCode: document.getElementById('s-rec').value })
+          });
+          toast('Recovery code rotated');
+          if (res.recoveryCode) showRecoveryModal(res.recoveryCode);
+          document.getElementById('s-rec').value = '';
+        } catch (error) {
+          errorEl.textContent = error.message;
+        }
+      });
+    }
+  };
+}
+
+// === SUPPORT / TICKETS ===
+
+function renderSupport(query) {
+  return async function supportView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+    const data = await api(`/api/tickets?page=${page}`);
+    const tickets = data.tickets || [];
+
+    app.innerHTML = `
+      <section class="page-head">
+        <h1>Support</h1>
+        <button class="btn small" id="support-new">+ New ticket</button>
+      </section>
+
+      <p class="muted">Use tickets for account issues, bug reports or questions to the team. For public discussions, post in a category.</p>
+
+      ${tickets.length ? tickets.map((t) => `
+        <a class="feed-row" href="#/ticket/${Number(t.id)}">
+          <span class="notif-icon">${t.status === 'open' ? '?' : '✓'}</span>
+          <div class="feed-main">
+            <div class="feed-head">
+              <span class="chip ${t.status === 'open' ? 'warn' : 'green'}">${esc(t.status)}</span>
+              <span class="feed-name">${esc(t.subject)}</span>
+              ${t.username ? `<span class="muted">· @${esc(t.username)}</span>` : ''}
+            </div>
+            <div class="muted">Updated ${time(t.updated_at)}</div>
+          </div>
+        </a>
+      `).join('') : '<section class="empty">No tickets yet.</section>'}
+
+      ${paginationHtml('#/support', page, Boolean(data.hasMore))}
+    `;
+
+    document.getElementById('support-new').addEventListener('click', () => {
+      const subject = prompt('Subject (up to 100 characters):');
+      if (!subject) return;
+      const body = prompt('Describe the issue (up to 5000 characters):');
+      if (!body) return;
+
+      api('/api/tickets', { method: 'POST', body: JSON.stringify({ action: 'create', subject, body }) })
+        .then((res) => { location.hash = `#/ticket/${res.id}`; })
+        .catch((err) => toast(err.message, true));
+    });
+  };
+}
+
+function renderTicket(ticketId) {
+  return async function ticketView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const data = await api(`/api/tickets?id=${ticketId}`);
+    const { ticket, messages } = data;
+
+    app.innerHTML = `
+      <section class="page-head">
+        <div>
+          <h1>${esc(ticket.subject)}</h1>
+          <div class="feed-tags">
+            <span class="chip ${ticket.status === 'open' ? 'warn' : 'green'}">${esc(ticket.status)}</span>
+            <span class="muted">Opened ${time(ticket.created_at)} · Updated ${time(ticket.updated_at)}</span>
+          </div>
+        </div>
+        <a class="btn ghost small" href="#/support">Back</a>
+      </section>
+
+      <section>
+        ${messages.map((m) => `
+          <article class="post">
+            ${avatarHtml(m.username, '')}
+            <div class="post-main">
+              <div class="feed-head">
+                <span class="feed-name">${userLink(m.username)}</span>
+                ${m.is_staff ? '<span class="chip green">staff</span>' : ''}
+                <span class="muted">· ${time(m.created_at)}</span>
+              </div>
+              <div class="post-body">${mdToHtml(m.body)}</div>
+            </div>
+          </article>
+        `).join('')}
+      </section>
+
+      ${ticket.status === 'closed' && !isStaff() ? '<p class="notice">This ticket is closed.</p>' : `
+        <form id="ticket-reply" class="form">
+          <label>Reply <textarea id="ticket-body" maxlength="5000" required minlength="1"></textarea></label>
+          <div class="admin-controls">
+            <button class="btn" type="submit">Send</button>
+            ${isStaff() ? `<button class="btn ghost" type="button" data-ticket-close="${ticket.id}">${ticket.status === 'closed' ? 'Reopen' : 'Close ticket'}</button>` : ''}
+          </div>
+          <div id="ticket-error" class="form-error"></div>
+        </form>
+      `}
+    `;
+
+    const replyForm = document.getElementById('ticket-reply');
+
+    if (replyForm) {
+      replyForm.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const errorEl = document.getElementById('ticket-error');
+
+        try {
+          await api('/api/tickets', {
+            method: 'POST',
+            body: JSON.stringify({ action: 'reply', ticketId, body: document.getElementById('ticket-body').value })
+          });
+          toast('Reply sent');
+          await render();
+        } catch (error) {
+          errorEl.textContent = error.message;
+        }
+      });
+    }
+
+    const closeBtn = document.querySelector('[data-ticket-close]');
+
+    if (closeBtn) {
+      closeBtn.addEventListener('click', async () => {
+        try {
+          await api('/api/tickets', {
+            method: 'POST',
+            body: JSON.stringify({ action: ticket.status === 'closed' ? 'reopen' : 'close', ticketId })
+          });
+          toast('Ticket updated');
+          await render();
+        } catch (error) {
+          toast(error.message, true);
+        }
+      });
+    }
+  };
+}
+
+// === APPEAL ===
+
+function renderAppeal() {
+  return async function appealView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    let appeals = [];
+
+    try {
+      const data = await api('/api/appeals?mine=1');
+      appeals = data.appeals || [];
+    } catch {
+      // ignore
+    }
+
+    const pending = appeals.find((a) => a.status === 'pending');
+
+    app.innerHTML = `
+      <section class="card narrow">
+        <h1>Appeal suspension</h1>
+
+        ${state.me.banned ? `
+          <div class="notice warn">
+            <strong>Reason:</strong> ${esc(state.me.ban_reason || '—')}
+            <br><span class="muted">Banned ${state.me.banned_at ? time(state.me.banned_at) : ''}</span>
+          </div>
+        ` : '<p>You are not currently suspended.</p>'}
+
+        ${pending ? `
+          <p class="notice">You already have a pending appeal submitted on ${time(pending.created_at)}.</p>
+        ` : state.me.banned ? `
+          <p class="muted">Write a short, honest explanation. Frivolous appeals are rejected.</p>
+          <form id="appeal-form" class="form">
+            <label>Reason <textarea id="appeal-body" maxlength="2000" required minlength="20"></textarea></label>
+            <button class="btn" type="submit">Submit appeal</button>
+            <div id="appeal-error" class="form-error"></div>
+          </form>
+        ` : ''}
+
+        ${appeals.length ? `
+          <h2>Your appeals</h2>
+          ${appeals.map((a) => `
+            <article class="admin-row">
+              <div class="admin-row-head">
+                <span class="chip ${a.status === 'pending' ? 'warn' : a.status === 'approved' ? 'green' : 'danger'}">${esc(a.status)}</span>
+                <span class="muted">${time(a.created_at)}</span>
+              </div>
+              <div class="post-body">${esc(a.reason)}</div>
+            </article>
+          `).join('')}
+        ` : ''}
+
+        <div class="admin-controls">
+          <a class="btn ghost small" href="#/settings">Settings</a>
+          <a class="btn ghost small" href="#/support">Open support ticket</a>
+          <button id="appeal-logout" class="btn danger small">Log out</button>
+        </div>
+      </section>
+    `;
+
+    document.getElementById('appeal-logout')?.addEventListener('click', logout);
+
+    const form = document.getElementById('appeal-form');
+
+    if (form) {
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const errorEl = document.getElementById('appeal-error');
+
+        try {
+          await api('/api/appeals', {
+            method: 'POST',
+            body: JSON.stringify({ action: 'submit', reason: document.getElementById('appeal-body').value })
+          });
+          toast('Appeal submitted');
+          await render();
+        } catch (error) {
+          errorEl.textContent = error.message;
+        }
+      });
+    }
+  };
+}
+
+// === CHANGELOG ===
+
+function renderChangelog(query) {
+  return async function changelogView() {
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+    const data = await api(`/api/changelog?page=${page}`);
+    const items = data.items || [];
+
+    if (data.latest_id) {
+      state.changelogSeenId = data.latest_id;
+      localStorage.setItem('penthub_changelog_seen', String(data.latest_id));
+      whatsnewBar.classList.add('hidden');
+    }
+
+    app.innerHTML = `
+      <section class="page-head">
+        <h1>What's new</h1>
+        ${state.me?.isAdmin ? '<button class="btn small" id="changelog-new">+ New release</button>' : ''}
+      </section>
+
+      ${items.map((c) => `
+        <article class="card">
+          <div class="feed-head">
+            <span class="chip green">${esc(c.version)}</span>
+            <span class="feed-name">${esc(c.title)}</span>
+            <span class="muted">· ${time(c.created_at)}</span>
+          </div>
+          <div class="post-body">${mdToHtml(c.body)}</div>
+        </article>
+      `).join('') || '<section class="empty">No changelog yet.</section>'}
+
+      ${paginationHtml('#/changelog', page, Boolean(data.hasMore))}
+    `;
+
+    document.getElementById('changelog-new')?.addEventListener('click', () => {
+      const version = prompt('Version (e.g. 1.1.0):');
+      if (!version) return;
+      const title = prompt('Title:');
+      if (!title) return;
+      const body = prompt('Body (markdown):');
+      if (!body) return;
+
+      api('/api/changelog', { method: 'POST', body: JSON.stringify({ version, title, body }) })
+        .then(() => { toast('Published'); render(); })
+        .catch((err) => toast(err.message, true));
+    });
+  };
+}
+
+// === LEARN (original training articles) ===
+
+const LEARN_ARTICLES = {
+  'home-wifi-lab': {
+    title: 'Building a home Wi-Fi audit lab (your own network only)',
+    body: `
+## Why a lab
+
+Wi-Fi security is best learned on infrastructure you fully own. A home lab gives you a safe, legal environment to understand how wireless networks actually work: beacons, association, the 4-way handshake, and how WPA2/WPA3 protect (or fail to protect) traffic.
+
+## What you need
+
+- A spare router you own, flashed or stock, isolated from your family network.
+- A dedicated test SSID with a passphrase you control.
+- A Wi-Fi adapter that supports monitor mode (for learning, not for touching other networks).
+- A laptop or SBC (a Raspberry Pi works great) for tooling.
+
+## Isolation rules
+
+1. The lab router must not bridge to your main network or the internet devices you care about.
+2. Use a separate VLAN or a physically separate router.
+3. Only your own client devices join the lab SSID.
+
+## What to practice
+
+- Reading beacons and understanding channel, SSID, and capability fields.
+- Capturing your own 4-way handshake from your own client reconnecting.
+- Verifying that a strong passphrase resists offline checks, and understanding why weak passphrases fail.
+- Comparing WPA2 and WPA3 behavior on your own AP, including management frame protection.
+
+## Hardening takeaways
+
+After the lab you should be able to configure a real home network properly: WPA3 or WPA2 with PMF enabled, a long random passphrase, disabled WPS, and a separate guest network for untrusted devices.
+
+## Legal line
+
+Everything above happens on hardware and spectrum you control. Scanning or capturing on networks you do not own is where learning ends and law-breaking begins. Stay on your side of the line.
+`
+  },
+  'ctf-start': {
+    title: 'Getting started with CTF: a practical path',
+    body: `
+## What CTF actually trains
+
+Capture-the-flag competitions are legal, structured puzzles. They train the exact skills a security engineer uses daily: reading documentation, debugging, scripting, and thinking in systems.
+
+## Your first month
+
+1. Pick one beginner-friendly platform and create an account.
+2. Solve 10 easy challenges in any category. Do not rush to hard ones.
+3. Write a one-paragraph note for every solved challenge: what worked, what did not.
+
+## Categories to taste
+
+- **Web**: requests, cookies, headers, and why validation matters.
+- **Crypto**: encoding vs encryption, and classic mistakes.
+- **Forensics**: carving data from files and memory dumps.
+- **Reverse**: reading assembly at a high level, using a disassembler.
+- **Misc**: scripting, automation, and creative thinking.
+
+## How to get unstuck
+
+- Sleep on it. Most flags come after a break.
+- Read writeups only after you solved it, or after a full day of honest effort. Then re-solve it yourself.
+- Keep a personal wiki. Your notes become your superpower.
+
+## From player to contributor
+
+When you are comfortable, join a team, play a jeopardy event, and later try attack-defense format. Teaching one beginner per season keeps your own fundamentals sharp.
+`
+  },
+  'uart-jtag-basics': {
+    title: 'UART and JTAG on your own devices: a gentle hardware intro',
+    body: `
+## The mindset
+
+Hardware security research starts with one rule: open only devices you own, and expect to brick some of them. A cheap development board is the right tuition fee.
+
+## UART: the friendly serial port
+
+UART is the simplest debug interface. Manufacturers often leave test points labeled TX, RX, GND (and sometimes VCC).
+
+1. Identify candidates with a multimeter: GND is continuous, VCC is stable voltage, TX idles high and flickers at boot.
+2. Connect a USB-UART adapter: adapter RX to device TX, adapter TX to device RX, GND to GND.
+3. Open a serial console at common baud rates (115200 first) and watch the boot log.
+
+The boot log teaches you how the firmware starts, what it mounts, and sometimes where it keeps configuration. On your own device, this is pure learning.
+
+## JTAG: the deeper interface
+
+JTAG gives boundary scan and, on some chips, full debug control. It is more pins, more timing, and more patience. Start with UART; come back to JTAG after you are comfortable with logic analyzers.
+
+## Tools worth learning
+
+- A USB-UART adapter and a serial terminal.
+- A logic analyzer to see what is actually on the wire.
+- A multimeter for continuity and voltage.
+
+## Safety and legality
+
+Never probe devices you do not own, never dump firmware you are not licensed to inspect, and never connect VCC from two sources at once. The skills transfer directly to authorized product security work.
+`
+  },
+  'responsible-disclosure': {
+    title: 'Responsible disclosure: how to report a vulnerability properly',
+    body: `
+## The goal
+
+You found a real vulnerability in a product or service. Responsible disclosure means the vendor learns about it safely, users get protected, and you get credit without legal risk.
+
+## Before you report
+
+1. Confirm the issue on an account or asset you are allowed to test.
+2. Do not read, copy or exfiltrate data beyond the minimum proof.
+3. Do not run destructive payloads. A proof of concept, not a breach.
+
+## Writing the report
+
+A good report has:
+
+- A one-paragraph summary: what, where, impact.
+- Exact reproduction steps with requests or screenshots.
+- The affected endpoint or component version.
+- Your suggested severity and a reasonable fix idea.
+
+## Where to send it
+
+Look for security.txt, a security@ address, or a public bug bounty program. If none exists, use a trusted coordinator or a national CERT.
+
+## Timelines and conduct
+
+Give the vendor a reasonable window (commonly 90 days) before any public discussion. Keep the details private until a fix ships. Professional conduct today is your reputation tomorrow.
+
+## The legal line
+
+Reporting is protected in many jurisdictions when done in good faith, but only if the discovery itself was lawful. Testing without permission is not disclosure; it is an incident. Always start from authorized ground.
+`
+  },
+  'rfid-nfc-lab': {
+    title: 'RFID/NFC lab on a budget: learn protocols safely',
+    body: `
+## What you can legally study
+
+Your own cards, your own tags, your own readers. That is a complete curriculum: low-frequency and high-frequency RFID, NFC modes, and how access systems make decisions.
+
+## A cheap starter kit
+
+- A multi-protocol reader/writer you own.
+- A few blank writable tags (different chip families).
+- Your own old access cards that are already deactivated.
+
+## Exercises
+
+1. Read the UID of every tag and notice which are fixed and which are random.
+2. Write an NDEF record to a tag and read it with a phone. Observe the handshake.
+3. Map the memory layout of a classic MIFARE tag on a blank sample. Understand sectors and keys conceptually.
+4. Compare how a reader behaves with a valid vs unknown tag.
+
+## What this teaches
+
+Most real-world access control failures are not crypto breaks; they are design mistakes: trusting the UID, shipping default keys, or accepting cloned identifiers. Seeing this firsthand on your own tags changes how you design systems.
+
+## The legal line
+
+Cloning or reading cards that are not yours is where it stops being a lab. Keep every experiment inside your own pocket of cards and readers.
+`
+  },
+  'network-hardening': {
+    title: 'Hardening your home network: a defensive checklist',
+    body: `
+## Why defensive skills matter
+
+Attack skills decay fast; defensive fundamentals compound. This checklist turns everything you learn into protection for people you care about.
+
+## Router
+
+- Change the admin password; disable remote management.
+- Keep firmware updated; enable auto-update if available.
+- Disable WPS and UPnP unless you truly need them.
+
+## Wi-Fi
+
+- WPA3 if supported, otherwise WPA2 with PMF.
+- A long random passphrase, not a dictionary phrase.
+- A separate guest network for visitors and cheap IoT devices.
+
+## Devices
+
+- Enable full-disk encryption on laptops and phones.
+- Use a password manager and unique passwords everywhere.
+- Turn on 2FA, preferring app or hardware keys over SMS.
+
+## Visibility
+
+- Run a local DNS with filtering for malware domains on your own network.
+- Periodically list connected clients on your router and recognize every one of them.
+
+## The habit
+
+Security is not a product you buy; it is a list of small decisions you keep making. Do this checklist once per season and your home network stays ahead of almost every realistic threat.
+`
+  }
+};
+
+function renderLearn(slug) {
+  return async function learnView() {
+    if (slug) {
+      const article = LEARN_ARTICLES[slug];
+
+      if (!article) throw new Error('Article not found');
+
+      app.innerHTML = `
+        <section class="page-head">
+          <div>
+            <h1>${esc(article.title)}</h1>
+            <p class="muted">Original PentHub training material · legal, authorized research only</p>
+          </div>
+          <div class="top-actions">
+            ${shareButtonHtml(`${location.origin}/#/learn/${slug}`, article.title)}
+            <a class="btn ghost small" href="#/learn">All articles</a>
+          </div>
+        </section>
+
+        <article class="card">
+          <div class="post-body">${mdToHtml(article.body)}</div>
+        </article>
+      `;
+
+      attachShareHandlers(app);
+      return;
+    }
+
+    app.innerHTML = `
+      <section class="page-head">
+        <h1>Learn</h1>
+        <p class="muted">Original training articles. Everything assumes your own devices and written permission.</p>
+      </section>
+
+      <div class="feature-grid">
+        ${Object.entries(LEARN_ARTICLES).map(([key, a]) => `
+          <a class="feature-card" href="#/learn/${key}">
+            <h3>${esc(a.title)}</h3>
+            <p>${esc(a.body.replace(/[#`\n]/g, ' ').slice(0, 120))}…</p>
+          </a>
+        `).join('')}
+      </div>
+    `;
+  };
+}
+
+// === FIRMWARE / WIKI / RELEASES ===
+
+function renderFirmwareHub() {
+  return async function firmwareHubView() {
+    let releases = [];
+
+    try {
+      const data = await api('/api/releases');
+      releases = data.releases || [];
+    } catch {
+      // ignore
+    }
+
+    app.innerHTML = `
+      <section class="welcome-hero">
+        <h1>Firmware Hub</h1>
+        <p>Latest releases from security hardware and firmware projects, auto-synced from GitHub.</p>
+      </section>
+
+      <section class="feature-grid">
+        <a class="feature-card" href="#/firmware/bruce/wiki">
+          <h3>Bruce wiki index</h3>
+          <p>Curated summaries with links to the official wiki.bruce.computer.</p>
+        </a>
+        <a class="feature-card" href="#/releases">
+          <h3>All releases</h3>
+          <p>Full feed of synced firmware releases with direct GitHub links.</p>
+        </a>
+        <a class="feature-card" href="#/category/esp32-security-lab">
+          <h3>ESP32 category</h3>
+          <p>Community discussions around ESP32-based security projects.</p>
+        </a>
+        <a class="feature-card" href="#/category/flipper-zero-research">
+          <h3>Flipper Zero</h3>
+          <p>Protocol research on your own devices in a controlled lab.</p>
+        </a>
+      </section>
+
+      <section class="page-head"><h2>Latest releases</h2></section>
+
+      ${releases.slice(0, 10).map((r) => `
+        <article class="card">
+          <div class="feed-head">
+            <span class="chip tag">${esc(r.source)}</span>
+            <span class="chip">${esc(r.tag)}</span>
+            <span class="muted">· ${time(r.published_at)}</span>
+          </div>
+          <h3>${esc(r.title)}</h3>
+          <div class="post-body">${mdToHtml((r.body || '').slice(0, 400))}</div>
+          <div class="admin-controls">
+            ${r.url ? `<a class="btn small" href="${esc(r.url)}" target="_blank" rel="noopener">View on GitHub</a>` : ''}
+            ${r.thread_id ? `<a class="btn ghost small" href="#/thread/${Number(r.thread_id)}">Discuss</a>` : ''}
+          </div>
+        </article>
+      `).join('') || '<section class="empty">No releases synced yet. The cron runs hourly.</section>'}
+    `;
+  };
+}
+
+function renderBruceWiki() {
+  return function wikiView() {
+    const original = 'https://wiki.bruce.computer/';
+
+    app.innerHTML = `
+      <div class="wiki-notice">
+        <strong>About this page</strong> — this is a curated index with short original summaries.
+        The full, official and always-up-to-date wiki lives at
+        <a href="${original}" target="_blank" rel="noopener">${original}</a>.
+        We link to the original for every topic.
+      </div>
+
+      <section class="page-head">
+        <h1>Bruce — curated wiki index</h1>
+        <a class="btn small" href="${original}" target="_blank" rel="noopener">Open original wiki</a>
+      </section>
+
+      <article class="card">
+        <h3>Getting started</h3>
+        <div class="post-body">
+          <p>Bruce is an open-source firmware for ESP32-based security multi-tools. It bundles modules for Wi-Fi, Bluetooth, RFID, NFC, IR and Sub-GHZ research behind one touch-friendly menu.</p>
+          <p><strong>Original:</strong> <a href="${original}" target="_blank" rel="noopener">wiki.bruce.computer</a></p>
+        </div>
+      </article>
+
+      <article class="card">
+        <h3>Installation & flashing</h3>
+        <div class="post-body">
+          <p>Flashing is typically done over USB with esptool or a web flasher on supported boards (M5Stack Cardputer, StickC Plus 2, Lilygo T-Display and others). Use stable releases on your own hardware.</p>
+          <p><strong>Original:</strong> <a href="${original}" target="_blank" rel="noopener">wiki.bruce.computer</a></p>
+        </div>
+      </article>
+
+      <article class="card">
+        <h3>Wi-Fi module</h3>
+        <div class="post-body">
+          <p>Scanning, handshake capture and lab testing against networks you own or have written permission to audit.</p>
+          <p><strong>Original:</strong> <a href="${original}" target="_blank" rel="noopener">wiki.bruce.computer</a></p>
+        </div>
+      </article>
+
+      <article class="card">
+        <h3>Bluetooth / BLE</h3>
+        <div class="post-body">
+          <p>Device discovery, GATT inspection and interaction with your own BLE peripherals. Useful for auditing IoT devices and studying pairing flows.</p>
+          <p><strong>Original:</strong> <a href="${original}" target="_blank" rel="noopener">wiki.bruce.computer</a></p>
+        </div>
+      </article>
+
+      <article class="card">
+        <h3>RFID / NFC / Sub-GHz / IR</h3>
+        <div class="post-body">
+          <p>Read, emulate and replay signals on your own tags, fobs and remotes. Only on equipment you own or are explicitly authorized to test.</p>
+          <p><strong>Original:</strong> <a href="${original}" target="_blank" rel="noopener">wiki.bruce.computer</a></p>
+        </div>
+      </article>
+
+      <article class="card">
+        <h3>GPIO & hardware</h3>
+        <div class="post-body">
+          <p>Pin mapping, external modules (CC1101, PN532, etc.) and wiring references. Great reading before soldering your own lab stand.</p>
+          <p><strong>Original:</strong> <a href="${original}" target="_blank" rel="noopener">wiki.bruce.computer</a></p>
+        </div>
+      </article>
+
+      <article class="card">
+        <h3>Troubleshooting & FAQ</h3>
+        <div class="post-body">
+          <p>Common boot issues, SD card quirks, board-specific notes and how to report bugs to maintainers.</p>
+          <p><strong>Original:</strong> <a href="${original}" target="_blank" rel="noopener">wiki.bruce.computer</a></p>
+        </div>
+      </article>
+
+      <p class="muted">Found a broken link or want to suggest a topic? <a href="#/support">Open a support ticket.</a></p>
+    `;
+  };
+}
+
+function renderReleases() {
+  return async function releasesView() {
+    let releases = [];
+
+    try {
+      const data = await api('/api/releases');
+      releases = data.releases || [];
+    } catch {
+      // ignore
+    }
+
+    app.innerHTML = `
+      <section class="page-head">
+        <h1>All releases</h1>
+        ${shareButtonHtml(`${location.origin}/#/releases`, 'PentHub firmware releases feed')}
+      </section>
+
+      ${releases.map((r) => `
+        <article class="card">
+          <div class="feed-head">
+            <span class="chip tag">${esc(r.source)}</span>
+            <span class="chip">${esc(r.tag)}</span>
+            <span class="muted">· ${time(r.published_at)}</span>
+          </div>
+          <h3>${esc(r.title)}</h3>
+          <div class="post-body">${mdToHtml(r.body || '')}</div>
+          <div class="admin-controls">
+            ${r.url ? `<a class="btn small" href="${esc(r.url)}" target="_blank" rel="noopener">View on GitHub</a>` : ''}
+            ${r.thread_id ? `<a class="btn ghost small" href="#/thread/${Number(r.thread_id)}">Discuss</a>` : ''}
+            ${shareButtonHtml(r.url || `${location.origin}/#/releases`, `${r.source} ${r.tag}`)}
+          </div>
+        </article>
+      `).join('') || '<section class="empty">No releases synced yet.</section>'}
+    `;
+
+    attachShareHandlers(app);
+  };
+}
+
+// === WELCOME ===
+
+function renderWelcome() {
+  return async function welcomeView() {
+    app.innerHTML = `
+      <section class="welcome-hero">
+        <h1>Welcome to PentHub</h1>
+        <p>A forum for <strong>legal pentesting</strong>, hardware security labs, CTF, ESP32, Flipper Zero and defensive security.</p>
+        <p class="muted">Authorized research only. Your own devices, networks and accounts, or written permission.</p>
+        <div class="admin-controls" style="justify-content:center">
+          <a class="btn" href="#/register">Create account</a>
+          <a class="btn ghost" href="#/login">Log in</a>
+          <a class="btn ghost" href="#/rules">Read the rules</a>
+        </div>
+      </section>
+
+      <section class="feature-grid">
+        <a class="feature-card" href="#/learn">
+          <h3>Learn</h3>
+          <p>Original training articles: home labs, CTF path, UART/JTAG, disclosure.</p>
+        </a>
+        <a class="feature-card" href="#/firmware">
+          <h3>Firmware hub</h3>
+          <p>Auto-synced releases from Bruce and other security firmware projects.</p>
+        </a>
+        <a class="feature-card" href="#/categories">
+          <h3>Communities</h3>
+          <p>Categories grouped into Firmwares, Hardwares, Networks, Research, Training.</p>
+        </a>
+        <a class="feature-card" href="#/changelog">
+          <h3>Transparent platform</h3>
+          <p>Reports, audit log, appeals, badges, tickets and a public changelog.</p>
+        </a>
+      </section>
+
+      <div class="admin-controls" style="justify-content:center">
+        <button class="btn ghost" id="welcome-skip">Skip welcome and enter the forum</button>
+      </div>
+    `;
+
+    document.getElementById('welcome-skip').addEventListener('click', () => {
+      state.welcomeSeen = true;
+      localStorage.setItem('penthub_welcome_seen', '1');
+      location.hash = '#/';
+    });
+  };
+}
+
+// === NEW THREAD / SEARCH / NOTIFICATIONS / MESSAGES ===
+
+function renderNewThread(query) {
+  return async function newThreadView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const categories = await ensureCategories();
+    const selectedCategory = query.get('category') || '';
+
+    app.innerHTML = `
+      <section class="card narrow">
+        <h1>New thread</h1>
+        <p class="muted">Legal research, education, CTF, defensive security or authorized pentesting only.</p>
+        <form id="new-thread-form" class="form">
+          <label>
+            Category
+            <select id="thread-category" required>
+              <option value="">Pick a category</option>
+              ${categories.map((c) => `<option value="${c.id}" ${c.slug === selectedCategory ? 'selected' : ''}>${esc(c.section)} · ${esc(c.name)}</option>`).join('')}
+            </select>
+          </label>
+          <label>Title <input id="thread-title" class="input" required minlength="4" maxlength="160" /></label>
+          <label>Tags (comma separated, max 5) <input id="thread-tags" class="input" maxlength="120" placeholder="esp32, lab, wifi-audit" /></label>
+          <label>First post <textarea id="thread-body" required minlength="1" maxlength="10000"></textarea></label>
+          <p class="muted">Markdown: **bold**, *italic*, \`code\`, \`\`\`blocks\`\`\`, lists, &gt; quotes, [link](https://...), @mentions</p>
+          <button class="btn" type="submit">Publish</button>
+          <div id="form-error" class="form-error"></div>
+        </form>
+      </section>
+    `;
+
+    document.getElementById('new-thread-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const errorEl = document.getElementById('form-error');
+
+      try {
+        const data = await api('/api/threads', {
+          method: 'POST',
+          body: JSON.stringify({
+            categoryId: Number(document.getElementById('thread-category').value),
+            title: document.getElementById('thread-title').value.trim(),
+            body: document.getElementById('thread-body').value,
+            tags: document.getElementById('thread-tags').value
+          })
+        });
+        toast('Thread created');
+        location.hash = `#/thread/${data.id}`;
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    });
+  };
+}
+
+function renderSearch(query) {
+  return async function searchView() {
+    const q = (query.get('q') || '').trim();
+
+    if (q.length < 3) {
+      app.innerHTML = '<section class="card narrow"><h1>Search</h1><p class="notice">Enter at least 3 characters.</p></section>';
+      return;
+    }
+
+    const data = await api(`/api/search?q=${encodeURIComponent(q)}`);
+    const results = data.results || [];
+
+    app.innerHTML = `
+      <section class="page-head"><h1>Search: ${esc(q)}</h1></section>
+      ${results.length ? results.map(threadRowHtml).join('') : '<section class="empty">Nothing found.</section>'}
+    `;
+  };
+}
+
+function notifRowHtml(n) {
+  const icon = n.type === 'mention' ? '@' : n.type === 'reaction' ? '★' : '↩';
+
+  return `
+    <a class="feed-row ${n.read_at ? '' : 'unread'}" href="${n.thread_id ? `#/thread/${Number(n.thread_id)}` : '#/notifications'}">
+      <span class="notif-icon">${icon}</span>
+      <div class="feed-main">
+        <div class="feed-head">
+          <span class="feed-name">${n.actor ? '@' + esc(n.actor) : 'system'}</span>
+          <span class="muted">· ${n.type} · ${time(n.created_at)}</span>
+        </div>
+        ${n.thread_title ? `<div class="muted">${esc(n.thread_title)}</div>` : ''}
+      </div>
+    </a>
+  `;
+}
+
+function renderNotifications(query) {
+  return async function notificationsView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+    const data = await api(`/api/notifications?page=${page}`);
+
+    api('/api/notifications/read', { method: 'POST' }).catch(() => {});
+    loadMe().then(() => { updateTopbar(); updateSidebar(); });
+
+    const items = data.notifications || [];
+
+    app.innerHTML = `
+      <section class="page-head"><h1>Notifications</h1></section>
+      ${items.length ? items.map(notifRowHtml).join('') : '<section class="empty">No notifications.</section>'}
+      ${paginationHtml('#/notifications', page, Boolean(data.hasMore))}
+    `;
+  };
+}
+
+function pmRowHtml(m, box) {
+  const other = box === 'inbox' ? m.sender_username : m.recipient_username;
+  const unread = box === 'inbox' && !m.read_at;
+
+  return `
+    <a class="feed-row ${unread ? 'unread' : ''}" href="#/messages/user/${encodeURIComponent(other)}">
+      ${avatarHtml(other, '')}
+      <div class="feed-main">
+        <div class="feed-head"><span class="feed-name">@${esc(other)}</span><span class="muted">· ${time(m.created_at)}</span></div>
+        <div class="muted">${esc((m.body || '').slice(0, 120))}</div>
+      </div>
+    </a>
+  `;
+}
+
+function renderMessages(query) {
+  return async function messagesView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const box = query.get('box') === 'outbox' ? 'outbox' : 'inbox';
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+    const data = await api(`/api/messages?box=${box}&page=${page}`);
+    const messages = data.messages || [];
+
+    app.innerHTML = `
+      <section class="page-head">
+        <h1>Messages</h1>
+        <a class="btn small" href="#/messages/new">New message</a>
+      </section>
+
+      <nav class="tabs">
+        <a class="tab ${box === 'inbox' ? 'active' : ''}" href="#/messages?box=inbox">Inbox</a>
+        <a class="tab ${box === 'outbox' ? 'active' : ''}" href="#/messages?box=outbox">Outbox</a>
+      </nav>
+
+      ${messages.length ? messages.map((m) => pmRowHtml(m, box)).join('') : '<section class="empty">No messages.</section>'}
+
+      ${paginationHtml(`#/messages?box=${box}`, page, Boolean(data.hasMore))}
+    `;
+  };
+}
+
+function renderConversation(username, query) {
+  return async function conversationView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+    const data = await api(`/api/messages?with=${encodeURIComponent(username)}&page=${page}`);
+    const messages = data.messages || [];
+
+    loadMe().then(() => { updateTopbar(); updateSidebar(); });
+
+    app.innerHTML = `
+      <section class="page-head">
+        <h1>Chat with ${userLink(data.with.username)}</h1>
+        <a class="btn ghost small" href="#/messages">Inbox</a>
+      </section>
+
+      ${messages.map((m) => postHtml({ ...m, username: m.sender_username, is_admin: false, badges: [], reactions: [] })).join('') || '<section class="empty">No messages yet.</section>'}
+
+      ${paginationHtml(`#/messages/user/${encodeURIComponent(username)}`, page, Boolean(data.hasMore))}
+
+      <form id="pm-reply-form" class="form">
+        <label>Message <textarea id="pm-reply-body" maxlength="5000" required minlength="1"></textarea></label>
+        <button class="btn" type="submit">Send</button>
+        <div id="pm-reply-error" class="form-error"></div>
+      </form>
+    `;
+
+    document.getElementById('pm-reply-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const errorEl = document.getElementById('pm-reply-error');
+
+      try {
+        await api('/api/messages', {
+          method: 'POST',
+          body: JSON.stringify({ toUsername: username, body: document.getElementById('pm-reply-body').value })
+        });
+        toast('Sent');
+        await render();
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    });
+  };
+}
+
+function renderNewMessage(query) {
+  return function newMessageView() {
+    if (!state.me) { location.hash = '#/login'; return; }
+
+    const to = query.get('to') || '';
+
+    app.innerHTML = `
+      <section class="card narrow">
+        <h1>New message</h1>
+        <form id="pm-new-form" class="form">
+          <label>To <input id="pm-to" class="input" required minlength="3" maxlength="32" value="${esc(to)}" /></label>
+          <label>Message <textarea id="pm-body" maxlength="5000" required minlength="1"></textarea></label>
+          <button class="btn" type="submit">Send</button>
+          <div id="pm-error" class="form-error"></div>
+        </form>
+      </section>
+    `;
+
+    document.getElementById('pm-new-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const errorEl = document.getElementById('pm-error');
+
+      try {
+        await api('/api/messages', {
+          method: 'POST',
+          body: JSON.stringify({
+            toUsername: document.getElementById('pm-to').value.trim(),
+            body: document.getElementById('pm-body').value
+          })
+        });
+        toast('Sent');
+        location.hash = `#/messages/user/${encodeURIComponent(document.getElementById('pm-to').value.trim())}`;
+      } catch (error) {
+        errorEl.textContent = error.message;
+      }
+    });
+  };
+}
+
+// === TERMS & PRIVACY (detailed) ===
+
+function renderTerms() {
+  return function termsView() {
+    app.innerHTML = `
+      <section class="card narrow">
+        <h1>Terms of Service</h1>
+        <p class="muted">Effective date: 2026-08-04 · Version 1.0</p>
+
+        <h2>1. About the service</h2>
+        <p>PentHub ("the service", "we", "us") is an online forum and community platform dedicated to legal security research, education, capture-the-flag (CTF) training, defensive security and hardware security labs. These Terms of Service ("Terms") govern your access to and use of the service, including any content, features and functionality offered through it.</p>
+        <p>By creating an account, accessing or using the service, you agree to be bound by these Terms. If you do not agree, you must not use the service.</p>
+
+        <h2>2. Eligibility</h2>
+        <p>2.1. You must be at least 18 years old, or the age of legal majority in your jurisdiction, whichever is higher, or have verifiable parental or guardian consent.</p>
+        <p>2.2. You must not be prohibited from using the service under applicable laws, and you must not be suspended or removed from the service previously.</p>
+        <p>2.3. You are responsible for ensuring that your use of the service complies with all laws, regulations and professional obligations applicable to you.</p>
+
+        <h2>3. Accounts and security</h2>
+        <p>3.1. You must provide accurate registration information and keep it up to date.</p>
+        <p>3.2. You are responsible for maintaining the confidentiality of your password and recovery code. We never ask for your password or recovery code outside the service interface.</p>
+        <p>3.3. You are responsible for all activities that occur under your account. Notify us immediately through Support if you suspect unauthorized use.</p>
+        <p>3.4. We may require additional verification if we detect suspicious activity.</p>
+
+        <h2>4. Permitted use</h2>
+        <p>4.1. The service is intended for: authorized penetration testing discussion (with written permission), research on your own devices and networks, CTF and training, defensive security, hardware labs on your own hardware, and responsible disclosure education.</p>
+        <p>4.2. You may share knowledge, tools and techniques only in contexts that are lawful and authorized.</p>
+
+        <h2>5. Prohibited conduct</h2>
+        <p>5.1. You must not use the service to plan, facilitate or discuss: unauthorized access to systems or accounts; brute-forcing third-party credentials; malware, stealers, ransomware or botnets; jamming or deauthentication of networks you do not own; denial-of-service attacks; carding, skimming or fraud; trafficking in stolen data, exploits for illegal use, or access to third-party systems.</p>
+        <p>5.2. You must not harass, threaten, impersonate others, or disclose personal data of third parties without a lawful basis.</p>
+        <p>5.3. You must not attempt to disrupt, probe or attack the service itself, except through our authorized reporting channels.</p>
+        <p>5.4. You must not use automated systems to extract content or create accounts at scale without written permission.</p>
+
+        <h2>6. User content</h2>
+        <p>6.1. You retain ownership of the content you post. You grant us a non-exclusive, worldwide, royalty-free license to host, store, reproduce, display and distribute your content as part of operating the service.</p>
+        <p>6.2. You represent and warrant that your content is lawful, that you have the rights to post it, and that it does not infringe third-party rights.</p>
+        <p>6.3. We may remove or modify content, or restrict its visibility, at our discretion, especially where required by law or these Terms.</p>
+
+        <h2>7. Moderation and enforcement</h2>
+        <p>7.1. Staff and moderators may lock, move, edit or delete threads and posts; issue warnings; suspend or ban accounts; and revoke badges or roles.</p>
+        <p>7.2. Bans include a stated reason. You may submit one appeal at a time through the Appeal page; frivolous or abusive appeals may be rejected without further review.</p>
+        <p>7.3. We are not required to give prior notice before enforcement actions where urgent action is needed.</p>
+
+        <h2>8. Releases and third-party links</h2>
+        <p>8.1. The service may display releases and links from third-party projects (for example, GitHub repositories and external wikis). These are provided for convenience only.</p>
+        <p>8.2. We do not control and are not responsible for third-party content, software or practices. You use third-party software at your own risk and under its own license.</p>
+
+        <h2>9. Intellectual property</h2>
+        <p>9.1. The service design, logo and original articles are our property or used with permission. Original training articles are provided for personal education; you may quote them with attribution.</p>
+        <p>9.2. If you believe content on the service infringes your rights, contact us through Support with details.</p>
+
+        <h2>10. Disclaimers</h2>
+        <p>10.1. The service is provided "as is" and "as available" without warranties of any kind, express or implied.</p>
+        <p>10.2. Security topics carry inherent risk. You acknowledge that applying techniques discussed on the service may damage hardware or data; you accept full responsibility for your actions.</p>
+        <p>10.3. We do not provide legal advice. For questions about legality in your jurisdiction, consult a qualified lawyer.</p>
+
+        <h2>11. Limitation of liability</h2>
+        <p>11.1. To the maximum extent permitted by law, we are not liable for indirect, incidental, special, consequential or punitive damages, or for loss of profits, data or goodwill.</p>
+        <p>11.2. Our total liability for any claim relating to the service is limited to the greater of the amount you paid us in the last 12 months (if any) or the minimum amount permitted by law.</p>
+
+        <h2>12. Termination</h2>
+        <p>12.1. You may delete your content and stop using the service at any time. You may request account export or deletion through Support.</p>
+        <p>12.2. We may suspend or terminate access for breach of these Terms, for legal requirements, or where continued access creates risk to others.</p>
+        <p>12.3. Sections that by their nature should survive termination (ownership, disclaimers, liability, disputes) survive.</p>
+
+        <h2>13. Changes to the Terms</h2>
+        <p>13.1. We may update these Terms from time to time. We will indicate the effective date at the top and, for material changes, provide notice through the "What's new" banner or a post.</p>
+        <p>13.2. Continued use after the effective date constitutes acceptance of the updated Terms.</p>
+
+        <h2>14. Governing law and disputes</h2>
+        <p>14.1. These Terms are governed by the laws of the jurisdiction where the service operator is established, without regard to conflict-of-law rules.</p>
+        <p>14.2. Disputes should first be raised through Support; if unresolved, courts of the operator's jurisdiction have exclusive competence, unless mandatory local law provides otherwise.</p>
+
+        <h2>15. Contact</h2>
+        <p>For any questions about these Terms, use the Support page or open a ticket. We aim to respond within a reasonable time.</p>
+      </section>
+    `;
+  };
+}
+
+function renderPrivacy() {
+  return function privacyView() {
+    app.innerHTML = `
+      <section class="card narrow">
+        <h1>Privacy Policy</h1>
+        <p class="muted">Effective date: 2026-08-04 · Version 1.0</p>
+
+        <h2>1. Introduction</h2>
+        <p>This Privacy Policy explains what data PentHub ("we") collects, why we collect it, how we use and protect it, and what choices you have. It applies to the website, APIs and related services.</p>
+
+        <h2>2. Data we collect</h2>
+        <p><strong>2.1. Account data.</strong> Username, optional display name, hashed password (PBKDF2), recovery code hash, optional bio, optional avatar and banner images, registration date, and role flags (admin/moderator).</p>
+        <p><strong>2.2. Content data.</strong> Threads, posts, tags, reactions, mentions, private messages, reports, tickets and appeals you create, with timestamps.</p>
+        <p><strong>2.3. Technical data.</strong> IP address at registration, login and audited actions; session token hashes; approximate activity timestamps. We do not store raw session tokens.</p>
+        <p><strong>2.4. Security checks.</strong> Turnstile verification results processed by Cloudflare to prevent abuse. Cloudflare also processes standard request metadata as part of delivering the site.</p>
+
+        <h2>3. How we use data</h2>
+        <p>3.1. To operate the service: display your content, deliver notifications and messages, and maintain community features.</p>
+        <p>3.2. To secure the service: prevent abuse, enforce rules, investigate incidents, and maintain audit logs.</p>
+        <p>3.3. To communicate with you: ticket replies, appeal outcomes, and service notices.</p>
+        <p>3.4. We do not sell personal data and we do not use it for advertising.</p>
+
+        <h2>4. Legal bases</h2>
+        <p>Where applicable law requires a legal basis, we rely on: performance of the contract (providing the service you requested), legitimate interests (security, abuse prevention, moderation), consent (optional profile elements), and legal obligations (where disclosure is required by law).</p>
+
+        <h2>5. Who we share data with</h2>
+        <p>5.1. <strong>Cloudflare</strong> provides hosting, CDN, D1 database and Turnstile; request metadata is processed as described in Cloudflare's privacy policy.</p>
+        <p>5.2. <strong>GitHub</strong> releases data is fetched publicly and displayed; no personal data is sent to GitHub by us.</p>
+        <p>5.3. <strong>Authorities</strong>, only where we are legally compelled, and only the minimum necessary data.</p>
+        <p>5.4. We do not share data with other third parties for their own use.</p>
+
+        <h2>6. Retention</h2>
+        <p>6.1. Account and content data are retained while your account exists.</p>
+        <p>6.2. Deleted posts are soft-deleted and retained for moderation and safety review.</p>
+        <p>6.3. Audit logs, reports, appeals and ban records are retained as long as needed for safety and legal compliance.</p>
+        <p>6.4. Rate-limit counters expire automatically within their time window.</p>
+
+        <h2>7. Your rights and choices</h2>
+        <p>7.1. You can access and edit your profile, bio, avatar and banner in Settings at any time.</p>
+        <p>7.2. You can change your password and rotate your recovery code in Settings.</p>
+        <p>7.3. You can delete your own posts (or request deletion via Support where staff action is needed).</p>
+        <p>7.4. You can request an export of your data, or account deletion, by opening a Support ticket. We will verify ownership before acting.</p>
+        <p>7.5. Where applicable law grants additional rights (access, rectification, erasure, restriction, objection, portability, complaint to a supervisory authority), you may exercise them via Support.</p>
+
+        <h2>8. Security</h2>
+        <p>8.1. Passwords are hashed with PBKDF2; sessions are stored as hashes; cookies are HttpOnly, Secure and SameSite=Lax.</p>
+        <p>8.2. Access to administrative functions is restricted and audited.</p>
+        <p>8.3. No method of transmission or storage is 100% secure; we work to protect your data with reasonable measures.</p>
+
+        <h2>9. Children</h2>
+        <p>The service is not directed to children under 18 (or the age of majority). We do not knowingly collect data from children. If you believe a child has provided data, contact us and we will delete it.</p>
+
+        <h2>10. International transfers</h2>
+        <p>Data is processed where our infrastructure operates (Cloudflare's global network). Where required, we rely on appropriate safeguards for international transfers.</p>
+
+        <h2>11. Cookies and local storage</h2>
+        <p>11.1. We use one essential session cookie. We do not use advertising or tracking cookies.</p>
+        <p>11.2. Your browser stores local preferences (for example, whether you have seen the welcome page or changelog). This data never leaves your device.</p>
+
+        <h2>12. Changes to this policy</h2>
+        <p>We may update this policy. The effective date at the top changes accordingly, and material changes are announced through the service. Continued use after the effective date means acceptance.</p>
+
+        <h2>13. Contact</h2>
+        <p>Privacy questions and rights requests: open a ticket on the Support page. Include enough information to verify ownership, but do not send secrets in tickets.</p>
+      </section>
+    `;
+  };
+}
+
+// === ADMIN ===
+
+function reportRowHtml(report) {
+  const bodyPreview = report.post_body || '';
+
+  return `
+    <article class="admin-row">
+      <div class="admin-row-head">
+        <span class="chip ${report.status === 'open' ? 'warn' : ''}">${esc(report.status)}</span>
+        <span class="muted">reported by @${esc(report.reporter)}</span>
+        <span class="muted">· ${time(report.created_at)}</span>
+      </div>
+      <p class="report-reason">Reason: ${esc(report.reason)}</p>
+      <div class="post-body muted">Post by @${esc(report.post_author)}: ${esc(bodyPreview.slice(0, 300))}${bodyPreview.length > 300 ? '…' : ''}</div>
+      <div class="feed-tags"><a href="#/thread/${Number(report.thread_id)}">Thread: ${esc(report.thread_title)}</a></div>
+      ${report.status === 'open' ? `
+        <div class="admin-controls">
+          <button class="btn small" data-admin-report="${report.id}" data-admin-action="resolve">Resolve</button>
+          <button class="btn ghost small" data-admin-report="${report.id}" data-admin-action="dismiss">Dismiss</button>
+        </div>
+      ` : ''}
+    </article>
+  `;
+}
+
+function userRowHtml(user) {
+  return `
+    <article class="admin-row">
+      <div class="admin-row-head">
+        ${avatarHtml(user.username, 'small', '')}
+        <span class="feed-name">${esc(user.display_name || user.username)}</span>
+        <span class="muted">@${esc(user.username)}</span>
+        ${user.is_admin ? '<span class="chip green">admin</span>' : ''}
+        ${user.is_moderator ? '<span class="chip">moderator</span>' : ''}
+        ${user.banned ? `<span class="chip danger">banned: ${esc(user.ban_reason || '—')}</span>` : ''}
+      </div>
+      <div class="feed-tags">
+        <span class="muted">id ${user.id} · ${user.thread_count} threads · ${user.post_count} posts · since ${time(user.created_at)}</span>
+      </div>
+      <div class="admin-controls">
+        ${user.banned
+          ? `<button class="btn small" data-admin-user="${user.id}" data-admin-action="unban">Unban</button>`
+          : `<button class="btn danger small" data-admin-user-ban="${user.id}">Ban</button>`}
+        ${user.is_moderator
+          ? `<button class="btn ghost small" data-admin-user="${user.id}" data-admin-action="mod_demote">Demote moderator</button>`
+          : `<button class="btn ghost small" data-admin-user="${user.id}" data-admin-action="mod_promote">Make moderator</button>`}
+        <a class="btn ghost small" href="#/user/${encodeURIComponent(user.username)}">View profile</a>
+      </div>
+    </article>
+  `;
+}
+
+function auditRowHtml(log) {
+  return `
+    <article class="admin-row">
+      <div class="admin-row-head">
+        <span class="chip">${esc(log.action)}</span>
+        <span class="muted">${log.username ? '@' + esc(log.username) : 'system'}</span>
+        <span class="muted">${esc(log.ip || '')}</span>
+        <span class="muted">· ${time(log.created_at)}</span>
+      </div>
+      ${log.details ? `<div class="feed-tags muted">${esc(log.details)}</div>` : ''}
+    </article>
+  `;
+}
+
+function appealRowHtml(a) {
+  return `
+    <article class="admin-row">
+      <div class="admin-row-head">
+        <span class="chip ${a.status === 'pending' ? 'warn' : a.status === 'approved' ? 'green' : 'danger'}">${esc(a.status)}</span>
+        <span class="feed-name">@${esc(a.username)}</span>
+        <span class="muted">· ${time(a.created_at)}</span>
+      </div>
+      <div class="post-body">${esc(a.reason)}</div>
+      ${a.status === 'pending' ? `
+        <div class="admin-controls">
+          <button class="btn small" data-appeal-approve="${a.id}">Approve (unban)</button>
+          <button class="btn ghost small" data-appeal-reject="${a.id}">Reject</button>
+          <a class="btn ghost small" href="#/user/${encodeURIComponent(a.username)}">Profile</a>
+        </div>
+      ` : `<div class="muted">Resolved ${a.resolved_at ? time(a.resolved_at) : ''}</div>`}
+    </article>
+  `;
+}
+
+function badgeRowHtml(b) {
+  return `
+    <article class="admin-row">
+      <div class="admin-row-head">
+        <span class="badge-chip" style="color:${esc(b.color)};border-color:${esc(b.color)}40">${esc(b.icon)} ${esc(b.label)}</span>
+        <span class="muted">${esc(b.name)}</span>
+        <span class="muted">· ${time(b.created_at)}</span>
+      </div>
+      <div class="admin-controls">
+        <button class="btn danger small" data-badge-delete="${b.id}">Delete badge</button>
+      </div>
+    </article>
+  `;
+}
+
+async function exportBackup() {
+  try {
+    const data = await api('/api/admin?type=export');
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `penthub-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast('Export ready');
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
+function renderAdmin(query) {
+  return async function adminView() {
+    if (!isStaff()) {
+      app.innerHTML = '<section class="card narrow"><h1>403</h1><p class="error">Staff only.</p></section>';
+      return;
+    }
+
+    const tab = ['reports', 'users', 'audit', 'appeals', 'badges', 'changelog'].includes(query.get('tab'))
+      ? query.get('tab')
+      : 'reports';
+
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+    const status = query.get('status') || 'open';
+
+    if (['users', 'audit', 'appeals', 'badges', 'changelog'].includes(tab) && !state.me.isAdmin) {
+      app.innerHTML = '<section class="card narrow"><h1>403</h1><p class="error">This section is admin-only.</p></section>';
+      return;
+    }
+
+    let content = '';
+
+    if (tab === 'reports') {
+      const data = await api(`/api/admin?type=reports&page=${page}&status=${encodeURIComponent(status)}`);
+      const reports = data.reports || [];
+      content = `
+        <div class="admin-controls">
+          <a class="btn ghost small" href="#/admin?tab=reports&status=open">Open</a>
+          <a class="btn ghost small" href="#/admin?tab=reports&status=all">All</a>
+        </div>
+      `;
+      content += reports.length ? reports.map(reportRowHtml).join('') : '<section class="empty">No reports.</section>';
+      content += paginationHtml(`#/admin?tab=reports&status=${encodeURIComponent(status)}`, page, data.hasMore);
+    } else if (tab === 'users') {
+      const q = query.get('q') || '';
+      const data = await api(`/api/admin?type=users&page=${page}&q=${encodeURIComponent(q)}`);
+      const users = data.users || [];
+      content = `
+        <form id="admin-user-search" class="form">
+          <input id="admin-user-q" class="input" placeholder="Search username" value="${esc(q)}" maxlength="32" />
+        </form>
+      `;
+      content += users.length ? users.map(userRowHtml).join('') : '<section class="empty">Nobody found.</section>';
+      content += paginationHtml(`#/admin?tab=users&q=${encodeURIComponent(q)}`, page, data.hasMore);
+    } else if (tab === 'audit') {
+      const data = await api(`/api/admin?type=audit&page=${page}`);
+      const logs = data.logs || [];
+      content = logs.length ? logs.map(auditRowHtml).join('') : '<section class="empty">Log is empty.</section>';
+      content += paginationHtml('#/admin?tab=audit', page, data.hasMore);
+    } else if (tab === 'appeals') {
+      const data = await api(`/api/admin?type=appeals&page=${page}`);
+      const appeals = data.appeals || [];
+      content = appeals.length ? appeals.map(appealRowHtml).join('') : '<section class="empty">No appeals.</section>';
+      content += paginationHtml('#/admin?tab=appeals', page, data.hasMore);
+    } else if (tab === 'badges') {
+      const data = await api('/api/badges');
+      const badges = data.badges || [];
+      content = `
+        <details class="card">
+          <summary>Create badge</summary>
+          <form id="badge-create" class="form" style="margin-top:10px">
+            <label>Name (slug) <input id="b-name" class="input" required minlength="2" maxlength="24" placeholder="founder" /></label>
+            <label>Label <input id="b-label" class="input" required maxlength="24" placeholder="Founder" /></label>
+            <label>Icon (1-2 chars) <input id="b-icon" class="input" maxlength="2" value="★" /></label>
+            <label>Color
+              <select id="b-color">
+                <option value="#58a6ff">Blue</option>
+                <option value="#3fb950">Green</option>
+                <option value="#d29922">Amber</option>
+                <option value="#f85149">Red</option>
+                <option value="#a371f7">Purple</option>
+                <option value="#f778ba">Pink</option>
+              </select>
+            </label>
+            <button class="btn" type="submit">Create</button>
+          </form>
+        </details>
+
+        <details class="card">
+          <summary>Assign / revoke badge</summary>
+          <form id="badge-assign-form" class="form" style="margin-top:10px">
+            <label>Username <input id="ba-username" class="input" required minlength="3" maxlength="32" /></label>
+            <label>Badge
+              <select id="ba-badge">
+                ${badges.map((b) => `<option value="${b.id}">${esc(b.icon)} ${esc(b.label)} (${esc(b.name)})</option>`).join('')}
+              </select>
+            </label>
+            <div class="admin-controls">
+              <button class="btn small" type="button" id="ba-assign">Assign</button>
+              <button class="btn danger small" type="button" id="ba-revoke">Revoke</button>
+            </div>
+          </form>
+        </details>
+
+        ${badges.length ? badges.map(badgeRowHtml).join('') : '<section class="empty">No badges.</section>'}
+      `;
+    } else if (tab === 'changelog') {
+      const data = await api(`/api/changelog?page=${page}`);
+      const items = data.items || [];
+      content = `
+        <button class="btn small" id="changelog-new-admin" style="margin-bottom:14px">+ New changelog entry</button>
+      `;
+      content += items.length
+        ? items.map((c) => `
+            <article class="admin-row">
+              <div class="admin-row-head">
+                <span class="chip green">${esc(c.version)}</span>
+                <span class="feed-name">${esc(c.title)}</span>
+                <span class="muted">· ${time(c.created_at)}</span>
+              </div>
+              <div class="post-body">${mdToHtml(c.body.slice(0, 300))}</div>
+            </article>
+          `).join('')
+        : '<section class="empty">No changelog yet.</section>';
+      content += paginationHtml('#/admin?tab=changelog', page, data.hasMore);
+    }
+
+    app.innerHTML = `
+      <section class="page-head">
+        <h1>Admin</h1>
+        ${state.me.isAdmin ? '<button id="export-btn" class="btn ghost small">Download backup (JSON)</button>' : ''}
+      </section>
+
+      <nav class="tabs">
+        <a class="tab ${tab === 'reports' ? 'active' : ''}" href="#/admin?tab=reports">Reports</a>
+        ${state.me.isAdmin ? `<a class="tab ${tab === 'users' ? 'active' : ''}" href="#/admin?tab=users">Users</a>` : ''}
+        ${state.me.isAdmin ? `<a class="tab ${tab === 'appeals' ? 'active' : ''}" href="#/admin?tab=appeals">Appeals</a>` : ''}
+        ${state.me.isAdmin ? `<a class="tab ${tab === 'badges' ? 'active' : ''}" href="#/admin?tab=badges">Badges</a>` : ''}
+        ${state.me.isAdmin ? `<a class="tab ${tab === 'changelog' ? 'active' : ''}" href="#/admin?tab=changelog">Changelog</a>` : ''}
+        ${state.me.isAdmin ? `<a class="tab ${tab === 'audit' ? 'active' : ''}" href="#/admin?tab=audit">Audit log</a>` : ''}
+      </nav>
+
+      ${content}
+    `;
+
+    bindAdminPage();
+  };
+}
+
+function bindAdminPage() {
+  document.querySelectorAll('[data-admin-report]').forEach((button) => {
+    button.addEventListener('click', () => adminAction('report', Number(button.dataset.adminReport), button.dataset.adminAction));
+  });
+
+  document.querySelectorAll('[data-admin-user]').forEach((button) => {
+    button.addEventListener('click', () => adminAction('user', Number(button.dataset.adminUser), button.dataset.adminAction));
+  });
+
+  document.querySelectorAll('[data-admin-user-ban]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const reason = prompt('Ban reason (shown to the user):');
+      if (!reason) return;
+      adminAction('user', Number(button.dataset.adminUserBan), 'ban', { reason });
+    });
+  });
+
+  document.querySelectorAll('[data-appeal-approve]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        await api('/api/appeals', { method: 'POST', body: JSON.stringify({ action: 'approve', id: Number(button.dataset.appealApprove) }) });
+        toast('Appeal approved, user unbanned');
+        await render();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-appeal-reject]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      try {
+        await api('/api/appeals', { method: 'POST', body: JSON.stringify({ action: 'reject', id: Number(button.dataset.appealReject) }) });
+        toast('Appeal rejected');
+        await render();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  });
+
+  document.querySelectorAll('[data-badge-delete]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (!confirm('Delete this badge? It will be revoked from everyone.')) return;
+      try {
+        await api('/api/badges', { method: 'POST', body: JSON.stringify({ action: 'delete', id: Number(button.dataset.badgeDelete) }) });
+        toast('Badge deleted');
+        await render();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  });
+
+  const searchForm = document.getElementById('admin-user-search');
+
+  if (searchForm) {
+    searchForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const q = document.getElementById('admin-user-q').value.trim();
+      location.hash = `#/admin?tab=users&q=${encodeURIComponent(q)}`;
+    });
+  }
+
+  document.getElementById('export-btn')?.addEventListener('click', exportBackup);
+
+  const badgeCreate = document.getElementById('badge-create');
+
+  if (badgeCreate) {
+    badgeCreate.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      try {
+        await api('/api/badges', {
+          method: 'POST',
+          body: JSON.stringify({
+            action: 'create',
+            name: document.getElementById('b-name').value,
+            label: document.getElementById('b-label').value,
+            icon: document.getElementById('b-icon').value,
+            color: document.getElementById('b-color').value
+          })
+        });
+        toast('Badge created');
+        await render();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+  }
+
+  async function assignOrRevoke(action) {
+    try {
+      const username = document.getElementById('ba-username').value.trim();
+      const badgeId = Number(document.getElementById('ba-badge').value);
+      const profile = await api(`/api/profile?username=${encodeURIComponent(username)}`);
+
+      await api('/api/badges', {
+        method: 'POST',
+        body: JSON.stringify({ action, userId: profile.profile.user.id, badgeId })
+      });
+
+      toast(action === 'assign' ? 'Badge assigned' : 'Badge revoked');
+      await render();
+    } catch (error) {
+      toast(error.message, true);
+    }
+  }
+
+  document.getElementById('ba-assign')?.addEventListener('click', () => assignOrRevoke('assign'));
+  document.getElementById('ba-revoke')?.addEventListener('click', () => assignOrRevoke('revoke'));
+
+  document.getElementById('changelog-new-admin')?.addEventListener('click', () => {
+    const version = prompt('Version (e.g. 1.1.0):');
+    if (!version) return;
+    const title = prompt('Title:');
+    if (!title) return;
+    const body = prompt('Body (markdown):');
+    if (!body) return;
+
+    api('/api/changelog', { method: 'POST', body: JSON.stringify({ version, title, body }) })
+      .then(() => { toast('Published'); render(); })
+      .catch((err) => toast(err.message, true));
+  });
+}
