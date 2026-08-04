@@ -1,10 +1,14 @@
 const app = document.getElementById('app');
 const authArea = document.getElementById('auth-area');
 const modal = document.getElementById('modal');
+const recoveryModal = document.getElementById('recovery-modal');
 
 const state = {
   me: null,
-  categories: []
+  categories: [],
+  config: null,
+  turnstileToken: null,
+  turnstileWidget: null
 };
 
 let reportPostId = null;
@@ -79,6 +83,14 @@ async function loadMe() {
   }
 }
 
+async function loadConfig() {
+  try {
+    state.config = await api('/api/config');
+  } catch {
+    state.config = null;
+  }
+}
+
 async function ensureCategories(force = false) {
   if (!state.categories.length || force) {
     const data = await api('/api/categories');
@@ -86,6 +98,63 @@ async function ensureCategories(force = false) {
   }
 
   return state.categories;
+}
+
+function renderTurnstile() {
+  const box = document.getElementById('turnstile-box');
+  if (!box) return;
+
+  const siteKey = state.config?.turnstileSiteKey;
+
+  if (!siteKey || !window.turnstile) {
+    box.innerHTML = '';
+    return;
+  }
+
+  if (state.turnstileWidget !== null) {
+    try {
+      window.turnstile.remove(state.turnstileWidget);
+    } catch {
+      // ignore
+    }
+  }
+
+  state.turnstileToken = null;
+
+  state.turnstileWidget = window.turnstile.render(box, {
+    sitekey: siteKey,
+    theme: 'dark',
+    callback: (token) => {
+      state.turnstileToken = token;
+    },
+    'expired-callback': () => {
+      state.turnstileToken = null;
+    },
+    'error-callback': () => {
+      state.turnstileToken = null;
+    }
+  });
+}
+
+function resetTurnstile() {
+  state.turnstileToken = null;
+
+  if (window.turnstile && state.turnstileWidget !== null) {
+    try {
+      window.turnstile.reset(state.turnstileWidget);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function showRecoveryModal(code) {
+  document.getElementById('recovery-code').textContent = code;
+  recoveryModal.classList.remove('hidden');
+}
+
+function closeRecoveryModal() {
+  recoveryModal.classList.add('hidden');
 }
 
 function updateAuthArea() {
@@ -523,7 +592,7 @@ function renderAdmin(query) {
 
       content = `
         <div class="admin-controls">
-          <a class="btn ghost small ${status === 'open' ? 'active-tab' : ''}" href="#/admin?tab=reports&status=open">Открытые</a>
+          <a class="btn ghost small" href="#/admin?tab=reports&status=open">Открытые</a>
           <a class="btn ghost small" href="#/admin?tab=reports&status=all">Все</a>
         </div>
       `;
@@ -606,11 +675,16 @@ function renderLogin() {
             <input id="login-password" class="input" type="password" autocomplete="current-password" required minlength="12" maxlength="128" />
           </label>
 
+          <div id="turnstile-box"></div>
+
           <button class="btn" type="submit">Войти</button>
           <div id="form-error" class="form-error"></div>
         </form>
+        <p><a href="#/recover">Забыл пароль / восстановить доступ</a></p>
       </section>
     `;
+
+    renderTurnstile();
 
     document.getElementById('login-form').addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -622,7 +696,11 @@ function renderLogin() {
       try {
         await api('/api/auth/login', {
           method: 'POST',
-          body: JSON.stringify({ username, password })
+          body: JSON.stringify({
+            username,
+            password,
+            turnstileToken: state.turnstileToken || undefined
+          })
         });
 
         state.me = await api('/api/auth/me');
@@ -630,6 +708,8 @@ function renderLogin() {
         location.hash = '#/';
       } catch (error) {
         errorEl.textContent = error.message;
+        resetTurnstile();
+        renderTurnstile();
       }
     });
   };
@@ -668,11 +748,15 @@ function renderRegister() {
             </span>
           </label>
 
+          <div id="turnstile-box"></div>
+
           <button class="btn" type="submit">Создать аккаунт</button>
           <div id="form-error" class="form-error"></div>
         </form>
       </section>
     `;
+
+    renderTurnstile();
 
     document.getElementById('register-form').addEventListener('submit', async (event) => {
       event.preventDefault();
@@ -683,15 +767,86 @@ function renderRegister() {
       const errorEl = document.getElementById('form-error');
 
       try {
-        await api('/api/auth/register', {
+        const data = await api('/api/auth/register', {
           method: 'POST',
-          body: JSON.stringify({ username, password, acceptTerms })
+          body: JSON.stringify({
+            username,
+            password,
+            acceptTerms,
+            turnstileToken: state.turnstileToken || undefined
+          })
         });
 
         state.me = await api('/api/auth/me');
         updateAuthArea();
         toast('Аккаунт создан');
         location.hash = '#/';
+
+        if (data.recoveryCode) {
+          showRecoveryModal(data.recoveryCode);
+        }
+      } catch (error) {
+        errorEl.textContent = error.message;
+        resetTurnstile();
+        renderTurnstile();
+      }
+    });
+  };
+}
+
+function renderRecover() {
+  return function recoverView() {
+    app.innerHTML = `
+      <section class="card page-card narrow">
+        <h1>Восстановление доступа</h1>
+
+        <p class="muted">
+          Введи ник и recovery-код, который получил при регистрации.
+          После сброса пароля старый код сгорит — получишь новый.
+        </p>
+
+        <form id="recover-form" class="form">
+          <label>
+            Ник
+            <input id="recover-username" class="input" autocomplete="username" required minlength="3" maxlength="32" />
+          </label>
+
+          <label>
+            Recovery-код
+            <input id="recover-code" class="input" autocomplete="off" required placeholder="PH-XXXX-XXXX-XXXX-XXXX" />
+          </label>
+
+          <label>
+            Новый пароль
+            <input id="recover-password" class="input" type="password" autocomplete="new-password" required minlength="12" maxlength="128" />
+          </label>
+
+          <button class="btn" type="submit">Сбросить пароль</button>
+          <div id="form-error" class="form-error"></div>
+        </form>
+      </section>
+    `;
+
+    document.getElementById('recover-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+
+      const username = document.getElementById('recover-username').value.trim();
+      const recoveryCode = document.getElementById('recover-code').value.trim();
+      const newPassword = document.getElementById('recover-password').value;
+      const errorEl = document.getElementById('form-error');
+
+      try {
+        const data = await api('/api/auth/recover', {
+          method: 'POST',
+          body: JSON.stringify({ username, recoveryCode, newPassword })
+        });
+
+        toast('Пароль изменён. Войди с новым паролем.');
+        location.hash = '#/login';
+
+        if (data.recoveryCode) {
+          showRecoveryModal(data.recoveryCode);
+        }
       } catch (error) {
         errorEl.textContent = error.message;
       }
@@ -873,6 +1028,8 @@ async function render() {
       renderLogin()();
     } else if (section === 'register') {
       renderRegister()();
+    } else if (section === 'recover') {
+      renderRecover()();
     } else if (section === 'new-thread') {
       await renderNewThread(query)();
     } else if (section === 'search') {
@@ -930,6 +1087,17 @@ async function submitReport() {
   }
 }
 
+async function copyRecoveryCode() {
+  const code = document.getElementById('recovery-code').textContent.trim();
+
+  try {
+    await navigator.clipboard.writeText(code);
+    toast('Код скопирован');
+  } catch {
+    toast('Скопируй код вручную', true);
+  }
+}
+
 document.getElementById('search-form').addEventListener('submit', (event) => {
   event.preventDefault();
 
@@ -950,10 +1118,19 @@ modal.addEventListener('click', (event) => {
 
 document.getElementById('modal-send').addEventListener('click', submitReport);
 
+document.getElementById('recovery-copy').addEventListener('click', copyRecoveryCode);
+document.getElementById('recovery-close').addEventListener('click', closeRecoveryModal);
+
+recoveryModal.addEventListener('click', (event) => {
+  if (event.target === recoveryModal) {
+    closeRecoveryModal();
+  }
+});
+
 window.addEventListener('hashchange', render);
 
 (async function init() {
-  await loadMe();
+  await Promise.all([loadMe(), loadConfig()]);
   updateAuthArea();
   await render();
 })();
