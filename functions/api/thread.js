@@ -9,7 +9,7 @@ export async function onRequest({ request, env }) {
   const id = Number.parseInt(url.searchParams.get('id') || '', 10);
 
   if (!Number.isInteger(id)) {
-    return json({ error: 'Некорректный id треда' }, 400);
+    return json({ error: 'Invalid thread id' }, 400);
   }
 
   try {
@@ -40,7 +40,7 @@ export async function onRequest({ request, env }) {
       .first();
 
     if (!thread) {
-      return json({ error: 'Тред не найден' }, 404);
+      return json({ error: 'Thread not found' }, 404);
     }
 
     return json({
@@ -51,6 +51,6 @@ export async function onRequest({ request, env }) {
       }
     });
   } catch {
-    return json({ error: 'Внутренняя ошибка' }, 500);
+    return json({ error: 'Internal error' }, 500);
   }
 }
