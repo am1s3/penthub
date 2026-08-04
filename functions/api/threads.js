@@ -13,6 +13,65 @@ import { storeMentions } from './posts.js';
 
 const THREADS_PER_PAGE = 20;
 
+export function parseTags(input) {
+  const list = Array.isArray(input) ? input : String(input || '').split(',');
+  const out = [];
+
+  for (const raw of list) {
+    const t = String(raw)
+      .trim()
+      .toLowerCase()
+      .replace(/^#/, '')
+      .replace(/[^a-z0-9-]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+
+    if (t.length >= 2 && t.length <= 24 && !out.includes(t)) {
+      out.push(t);
+    }
+
+    if (out.length >= 5) break;
+  }
+
+  return out;
+}
+
+export async function attachTags(env, threads) {
+  const ids = threads.map((t) => t.id);
+
+  if (!ids.length) return threads;
+
+  const placeholders = ids.map(() => '?').join(',');
+
+  const rows = await env.DB.prepare(
+    `SELECT tt.thread_id, g.name FROM thread_tags tt JOIN tags g ON g.id = tt.tag_id WHERE tt.thread_id IN (${placeholders})`
+  )
+    .bind(...ids)
+    .all();
+
+  const map = {};
+
+  for (const row of rows.results || []) {
+    (map[row.thread_id] ||= []).push(row.name);
+  }
+
+  return threads.map((t) => ({ ...t, tags: map[t.id] || [] }));
+}
+
+async function storeTags(env, threadId, tags) {
+  for (const name of tags) {
+    await env.DB.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)').bind(name).run();
+
+    const tag = await env.DB.prepare('SELECT id FROM tags WHERE name = ?').bind(name).first();
+
+    if (tag) {
+      await env.DB.prepare('INSERT OR IGNORE INTO thread_tags (thread_id, tag_id) VALUES (?, ?)')
+        .bind(threadId, tag.id)
+        .run();
+    }
+  }
+}
+
 export async function onRequest({ request, env }) {
   if (request.method === 'GET') return getThreads(request, env);
   if (request.method === 'POST') return createThread(request, env);
@@ -22,19 +81,28 @@ export async function onRequest({ request, env }) {
 async function getThreads(request, env) {
   const url = new URL(request.url);
   const category = url.searchParams.get('category');
+  const tag = (url.searchParams.get('tag') || '').trim().toLowerCase();
   const page = Math.max(1, Number(url.searchParams.get('page') || 1) || 1);
   const offset = (page - 1) * THREADS_PER_PAGE;
 
   const where = ['t.deleted = 0'];
+  const joins = [];
   const params = [];
 
   if (category) {
     if (!/^[a-z0-9-]{3,64}$/.test(category)) {
       return json({ error: 'Invalid category' }, 400);
     }
-
     where.push('c.slug = ?');
     params.push(category);
+  }
+
+  if (tag) {
+    if (!/^[a-z0-9-]{2,24}$/.test(tag)) {
+      return json({ error: 'Invalid tag' }, 400);
+    }
+    joins.push('JOIN thread_tags tt ON tt.thread_id = t.id JOIN tags g ON g.id = tt.tag_id AND g.name = ?');
+    params.push(tag);
   }
 
   params.push(THREADS_PER_PAGE, offset);
@@ -57,6 +125,7 @@ async function getThreads(request, env) {
         FROM threads t
         JOIN categories c ON c.id = t.category_id
         JOIN users u ON u.id = t.user_id
+        ${joins.join(' ')}
         LEFT JOIN posts p ON p.thread_id = t.id AND p.deleted = 0
         WHERE ${where.join(' AND ')}
         GROUP BY t.id
@@ -67,7 +136,7 @@ async function getThreads(request, env) {
       .bind(...params)
       .all();
 
-    const threads = result.results || [];
+    const threads = await attachTags(env, result.results || []);
 
     return json({ threads, page, perPage: THREADS_PER_PAGE, hasMore: threads.length === THREADS_PER_PAGE });
   } catch {
@@ -99,6 +168,7 @@ async function createThread(request, env) {
   const categoryId = Number.parseInt(body.categoryId, 10);
   const title = cleanText(body.title, 160, false);
   const firstPostBody = cleanText(body.body, 10000, true);
+  const tags = parseTags(body.tags);
 
   if (!Number.isInteger(categoryId)) {
     return json({ error: 'Invalid category' }, 400);
@@ -149,6 +219,7 @@ async function createThread(request, env) {
         .first();
 
       await storeMentions(env, firstPost?.id ?? thread.id, firstPostBody, user.id);
+      await storeTags(env, thread.id, tags);
     } catch (postError) {
       await env.DB.prepare('UPDATE threads SET deleted = 1 WHERE id = ?')
         .bind(thread.id)
