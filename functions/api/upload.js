@@ -1,6 +1,6 @@
-import { json, readJson, checkOrigin, getSessionUser, rateLimit, randomHex } from '../_utils.js';
+import { json, checkOrigin, getSessionUser, rateLimit, randomHex } from '../_utils.js';
 
-const MAX_BYTES = 300000;
+const MAX_BYTES = 900000;
 
 export async function onRequest({ request, env }) {
   if (request.method !== 'POST') {
@@ -18,11 +18,17 @@ export async function onRequest({ request, env }) {
     return json({ error: 'Too many uploads per hour' }, 429);
   }
 
+  const text = await request.text();
+
+  if (!text) {
+    return json({ error: 'Empty body' }, 400);
+  }
+
   let body;
   try {
-    body = await readJson(request, 1200000);
+    body = JSON.parse(text);
   } catch {
-    return json({ error: 'Invalid JSON' }, 400);
+    return json({ error: `Invalid JSON (len=${text.length}, head=${text.slice(0, 24)})` }, 400);
   }
 
   const m = /^data:(image\/(png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(body.dataUrl || '');
@@ -36,7 +42,7 @@ export async function onRequest({ request, env }) {
   }
 
   if (bin.length > MAX_BYTES) {
-    return json({ error: 'Image too big (max 300KB)' }, 400);
+    return json({ error: 'Image too big after resize (max 900KB)' }, 400);
   }
 
   const bytes = new Uint8Array(bin.length);
@@ -46,7 +52,7 @@ export async function onRequest({ request, env }) {
 
   try {
     await env.DB.prepare('INSERT INTO files (key, mime, data, created_at) VALUES (?, ?, ?, ?)')
-      .bind(key, m[1], bytes.buffer, Date.now())
+      .bind(key, 'image/jpeg', bytes.buffer, Date.now())
       .run();
   } catch {
     return json({ error: 'Storage write failed' }, 500);
