@@ -52,6 +52,22 @@
     </div>
   </div>
 
+  <div id="recovery-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Код восстановления">
+    <div class="modal-card">
+      <h3>Код восстановления доступа</h3>
+      <p class="muted">
+        Сохрани его в надёжном месте (менеджер паролей, сейф). Это ЕДИНСТВЕННЫЙ способ
+        восстановить доступ без почты. Показывается один раз.
+      </p>
+      <pre class="notice" id="recovery-code"></pre>
+      <div class="modal-actions">
+        <button id="recovery-copy" class="btn ghost" type="button">Скопировать</button>
+        <button id="recovery-close" class="btn" type="button">Я сохранил</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" defer></script>
   <script src="/app.js" defer></script>
 </body>
 </html>
