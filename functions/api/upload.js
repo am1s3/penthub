@@ -28,31 +28,30 @@ export async function onRequest({ request, env }) {
   try {
     body = JSON.parse(text);
   } catch {
-    return json({ error: `Invalid JSON (len=${text.length}, head=${text.slice(0, 24)})` }, 400);
+    return json({ error: `Invalid JSON (len=${text.length})` }, 400);
   }
 
   const m = /^data:(image\/(png|jpeg|webp|gif));base64,([A-Za-z0-9+/=]+)$/.exec(body.dataUrl || '');
   if (!m) return json({ error: 'Only PNG/JPEG/WebP/GIF images are allowed' }, 400);
 
-  let bin;
+  const b64 = m[3];
+
+  let size;
   try {
-    bin = atob(m[3]);
+    size = atob(b64).length;
   } catch {
     return json({ error: 'Bad image data' }, 400);
   }
 
-  if (bin.length > MAX_BYTES) {
+  if (size > MAX_BYTES) {
     return json({ error: 'Image too big after resize (max 2MB)' }, 400);
   }
-
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
 
   const key = `${Date.now()}-${randomHex(6)}`;
 
   try {
     await env.DB.prepare('INSERT INTO files (key, mime, data, created_at) VALUES (?, ?, ?, ?)')
-      .bind(key, 'image/jpeg', bytes.buffer, Date.now())
+      .bind(key, m[1], b64, Date.now())
       .run();
   } catch {
     return json({ error: 'Storage write failed' }, 500);
