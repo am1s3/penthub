@@ -1,1 +1,14 @@
-
+{
+  "name": "penthub",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler pages dev public",
+    "db:create": "wrangler d1 create penthub-db",
+    "db:migrate": "wrangler d1 execute penthub-db --remote --file=./schema.sql",
+    "db:migrate:local": "wrangler d1 execute penthub-db --local --file=./schema.sql",
+    "deploy": "wrangler pages deploy public"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}
