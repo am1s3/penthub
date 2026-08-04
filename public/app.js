@@ -40,6 +40,10 @@ function toast(message, isError = false) {
   setTimeout(() => node.remove(), 3500);
 }
 
+function isStaff() {
+  return Boolean(state.me && (state.me.isAdmin || state.me.isModerator));
+}
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     credentials: 'same-origin',
@@ -90,8 +94,10 @@ function updateAuthArea() {
   if (state.me) {
     authArea.innerHTML = `
       <a class="btn small" href="#/new-thread">+ Тема</a>
+      ${isStaff() ? '<a class="btn ghost small" href="#/admin">Админка</a>' : ''}
       <span class="muted">@${esc(state.me.username)}</span>
       ${state.me.isAdmin ? '<span class="badge admin">admin</span>' : ''}
+      ${state.me.isModerator ? '<span class="badge">moderator</span>' : ''}
       <button id="logout-btn" class="btn ghost small" type="button">Выход</button>
     `;
 
@@ -238,7 +244,7 @@ function renderCategory(slug, query) {
 }
 
 function threadAdminHtml(thread) {
-  if (!state.me?.isAdmin) return '';
+  if (!isStaff()) return '';
 
   return `
     <div class="admin-controls">
@@ -262,7 +268,7 @@ function replyFormHtml(thread) {
     return `<p class="notice"><a href="#/login">Войди</a>, чтобы отвечать.</p>`;
   }
 
-  if (thread.is_locked && !state.me.isAdmin) {
+  if (thread.is_locked && !isStaff()) {
     return `<p class="notice warn">Тред закрыт для ответов.</p>`;
   }
 
@@ -278,12 +284,12 @@ function replyFormHtml(thread) {
   `;
 }
 
-function postFooterHtml(thread, post) {
+function postFooterHtml(post) {
   const reportButton = state.me
     ? `<button class="link" data-report-post="${post.id}">Пожаловаться</button>`
     : '';
 
-  const adminDelete = state.me?.isAdmin
+  const adminDelete = isStaff()
     ? `<button class="link danger" data-admin-post="${post.id}" data-admin-action="delete">Удалить</button>`
     : '';
 
@@ -304,7 +310,7 @@ function postHtml(thread, post) {
       <div class="post-body">${textToHtml(post.body)}</div>
 
       <footer>
-        ${postFooterHtml(thread, post)}
+        ${postFooterHtml(post)}
       </footer>
     </article>
   `;
@@ -415,6 +421,175 @@ async function adminAction(type, id, action) {
   }
 }
 
+function reportRowHtml(report) {
+  const bodyPreview = report.post_body || '';
+
+  return `
+    <article class="admin-row">
+      <div class="admin-row-head">
+        <span class="badge ${report.status === 'open' ? 'warn' : ''}">${esc(report.status)}</span>
+        <span class="muted">жалоба от @${esc(report.reporter)}</span>
+        <time>${time(report.created_at)}</time>
+      </div>
+
+      <p class="report-reason">Причина: ${esc(report.reason)}</p>
+
+      <div class="post-body muted">
+        Пост @${esc(report.post_author)}: ${esc(bodyPreview.slice(0, 300))}${bodyPreview.length > 300 ? '…' : ''}
+      </div>
+
+      <div class="meta">
+        <a href="#/thread/${Number(report.thread_id)}">Тред: ${esc(report.thread_title)}</a>
+      </div>
+
+      ${
+        report.status === 'open'
+          ? `
+            <div class="admin-controls">
+              <button class="btn small" data-admin-report="${report.id}" data-admin-action="resolve">Решено</button>
+              <button class="btn ghost small" data-admin-report="${report.id}" data-admin-action="dismiss">Отклонить</button>
+            </div>
+          `
+          : ''
+      }
+    </article>
+  `;
+}
+
+function userRowHtml(user) {
+  return `
+    <article class="admin-row">
+      <div class="admin-row-head">
+        <span class="post-author">@${esc(user.username)}</span>
+        ${user.is_admin ? '<span class="badge admin">admin</span>' : ''}
+        ${user.is_moderator ? '<span class="badge">moderator</span>' : ''}
+        ${user.banned ? '<span class="badge danger">banned</span>' : ''}
+      </div>
+
+      <div class="meta">
+        <span>id: ${user.id}</span>
+        <span>тредов: ${user.thread_count}</span>
+        <span>постов: ${user.post_count}</span>
+        <span>с ${time(user.created_at)}</span>
+      </div>
+
+      <div class="admin-controls">
+        ${
+          user.banned
+            ? `<button class="btn small" data-admin-user="${user.id}" data-admin-action="unban">Разбанить</button>`
+            : `<button class="btn danger small" data-admin-user="${user.id}" data-admin-action="ban">Забанить</button>`
+        }
+        ${
+          user.is_moderator
+            ? `<button class="btn ghost small" data-admin-user="${user.id}" data-admin-action="mod_demote">Снять модера</button>`
+            : `<button class="btn ghost small" data-admin-user="${user.id}" data-admin-action="mod_promote">В модераторы</button>`
+        }
+      </div>
+    </article>
+  `;
+}
+
+function renderAdmin(query) {
+  return async function adminView() {
+    if (!isStaff()) {
+      app.innerHTML = `
+        <section class="card page-card narrow">
+          <h1>403</h1>
+          <p class="error">Доступ только для стаффа.</p>
+        </section>
+      `;
+      return;
+    }
+
+    const tab = query.get('tab') === 'users' ? 'users' : 'reports';
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+    const status = query.get('status') || 'open';
+
+    if (tab === 'users' && !state.me.isAdmin) {
+      app.innerHTML = `
+        <section class="card page-card narrow">
+          <h1>403</h1>
+          <p class="error">Управление пользователями — только админ.</p>
+        </section>
+      `;
+      return;
+    }
+
+    let content = '';
+
+    if (tab === 'reports') {
+      const data = await api(`/api/admin?type=reports&page=${page}&status=${encodeURIComponent(status)}`);
+      const reports = data.reports || [];
+
+      content = `
+        <div class="admin-controls">
+          <a class="btn ghost small ${status === 'open' ? 'active-tab' : ''}" href="#/admin?tab=reports&status=open">Открытые</a>
+          <a class="btn ghost small" href="#/admin?tab=reports&status=all">Все</a>
+        </div>
+      `;
+
+      content += reports.length
+        ? reports.map(reportRowHtml).join('')
+        : '<section class="empty">Жалоб нет.</section>';
+
+      content += paginationHtml(`#/admin?tab=reports&status=${encodeURIComponent(status)}`, page, data.hasMore);
+    } else {
+      const q = query.get('q') || '';
+      const data = await api(`/api/admin?type=users&page=${page}&q=${encodeURIComponent(q)}`);
+      const users = data.users || [];
+
+      content = `
+        <form id="admin-user-search" class="form">
+          <input id="admin-user-q" class="input" placeholder="Поиск ника" value="${esc(q)}" maxlength="32" />
+        </form>
+      `;
+
+      content += users.length
+        ? users.map(userRowHtml).join('')
+        : '<section class="empty">Никого не нашли.</section>';
+
+      content += paginationHtml(`#/admin?tab=users&q=${encodeURIComponent(q)}`, page, data.hasMore);
+    }
+
+    app.innerHTML = `
+      <section class="section-head"><h1>Админка</h1></section>
+
+      <nav class="tabs">
+        <a class="tab ${tab === 'reports' ? 'active' : ''}" href="#/admin?tab=reports">Жалобы</a>
+        ${state.me.isAdmin ? `<a class="tab ${tab === 'users' ? 'active' : ''}" href="#/admin?tab=users">Пользователи</a>` : ''}
+      </nav>
+
+      <section class="admin-list">${content}</section>
+    `;
+
+    bindAdminPage();
+  };
+}
+
+function bindAdminPage() {
+  document.querySelectorAll('[data-admin-report]').forEach((button) => {
+    button.addEventListener('click', () => {
+      adminAction('report', Number(button.dataset.adminReport), button.dataset.adminAction);
+    });
+  });
+
+  document.querySelectorAll('[data-admin-user]').forEach((button) => {
+    button.addEventListener('click', () => {
+      adminAction('user', Number(button.dataset.adminUser), button.dataset.adminAction);
+    });
+  });
+
+  const searchForm = document.getElementById('admin-user-search');
+
+  if (searchForm) {
+    searchForm.addEventListener('submit', (event) => {
+      event.preventDefault();
+      const q = document.getElementById('admin-user-q').value.trim();
+      location.hash = `#/admin?tab=users&q=${encodeURIComponent(q)}`;
+    });
+  }
+}
+
 function renderLogin() {
   return function loginView() {
     app.innerHTML = `
@@ -445,11 +620,12 @@ function renderLogin() {
       const errorEl = document.getElementById('form-error');
 
       try {
-        state.me = await api('/api/auth/login', {
+        await api('/api/auth/login', {
           method: 'POST',
           body: JSON.stringify({ username, password })
         });
 
+        state.me = await api('/api/auth/me');
         updateAuthArea();
         location.hash = '#/';
       } catch (error) {
@@ -507,11 +683,12 @@ function renderRegister() {
       const errorEl = document.getElementById('form-error');
 
       try {
-        state.me = await api('/api/auth/register', {
+        await api('/api/auth/register', {
           method: 'POST',
           body: JSON.stringify({ username, password, acceptTerms })
         });
 
+        state.me = await api('/api/auth/me');
         updateAuthArea();
         toast('Аккаунт создан');
         location.hash = '#/';
@@ -702,6 +879,8 @@ async function render() {
       await renderSearch(query)();
     } else if (section === 'rules') {
       renderRules()();
+    } else if (section === 'admin') {
+      await renderAdmin(query)();
     } else {
       renderNotFound()();
     }
