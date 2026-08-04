@@ -25,8 +25,117 @@ function esc(value) {
   });
 }
 
-function textToHtml(value) {
-  return esc(value).replace(/\n/g, '<br>');
+function mdInline(s) {
+  let t = s;
+
+  t = t.replace(/`([^`]+)`/g, (m, c) => `<code>${c}</code>`);
+
+  t = t.replace(/\[([^\]]{1,200})\]\(([^)\s]{1,500})\)/g, (m, label, url) => {
+    if (!/^https?:\/\//i.test(url)) return label;
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+  });
+
+  t = t.replace(/\*\*([^*]{1,300}?)\*\*/g, '<strong>$1</strong>');
+  t = t.replace(/(^|[^*])\*([^*\n]{1,300}?)\*(?!\*)/g, '$1<em>$2</em>');
+
+  return t;
+}
+
+function mdToHtml(src) {
+  const escaped = esc(src || '');
+
+  const blocks = [];
+  let text = escaped.replace(/```([\s\S]*?)```/g, (m, code) => {
+    blocks.push(code.replace(/^\n+/, '').replace(/\n+$/, ''));
+    return `\u0000B${blocks.length - 1}\u0000`;
+  });
+
+  const lines = text.split('\n');
+  const out = [];
+  let listType = null;
+  let para = [];
+
+  const flushPara = () => {
+    if (para.length) {
+      out.push(`<p>${para.map(mdInline).join('<br>')}</p>`);
+      para = [];
+    }
+  };
+
+  const closeList = () => {
+    if (listType) {
+      out.push(`</${listType}>`);
+      listType = null;
+    }
+  };
+
+  for (const line of lines) {
+    const blockMatch = line.match(/^\u0000B(\d+)\u0000$/);
+
+    if (blockMatch) {
+      flushPara();
+      closeList();
+      out.push(`<pre class="code-block"><code>${blocks[Number(blockMatch[1])]}</code></pre>`);
+      continue;
+    }
+
+    const h = line.match(/^(#{1,3})\s+(.+)$/);
+
+    if (h) {
+      flushPara();
+      closeList();
+      const level = h[1].length + 2;
+      out.push(`<h${level}>${mdInline(h[2])}</h${level}>`);
+      continue;
+    }
+
+    if (/^&gt;\s?/.test(line)) {
+      flushPara();
+      closeList();
+      out.push(`<blockquote>${mdInline(line.replace(/^&gt;\s?/, ''))}</blockquote>`);
+      continue;
+    }
+
+    const ul = line.match(/^[-*]\s+(.+)$/);
+
+    if (ul) {
+      flushPara();
+      if (listType !== 'ul') {
+        closeList();
+        out.push('<ul>');
+        listType = 'ul';
+      }
+      out.push(`<li>${mdInline(ul[1])}</li>`);
+      continue;
+    }
+
+    const ol = line.match(/^\d+[.)]\s+(.+)$/);
+
+    if (ol) {
+      flushPara();
+      if (listType !== 'ol') {
+        closeList();
+        out.push('<ol>');
+        listType = 'ol';
+      }
+      out.push(`<li>${mdInline(ol[1])}</li>`);
+      continue;
+    }
+
+    if (line.trim() === '') {
+      flushPara();
+      closeList();
+      continue;
+    }
+
+    closeList();
+    para.push(line);
+  }
+
+  flushPara();
+  closeList();
+
+  return out.join('\n');
 }
 
 function time(timestamp) {
@@ -347,6 +456,9 @@ function replyFormHtml(thread) {
         Ответ
         <textarea id="reply-body" maxlength="10000" required minlength="1"></textarea>
       </label>
+      <p class="muted">
+        Markdown: **жирный**, *курсив*, \`код\`, \`\`\`блоки кода\`\`\`, списки (- и 1.), &gt; цитаты, [ссылка](https://example.com)
+      </p>
       <button class="btn" type="submit">Ответить</button>
       <div id="reply-error" class="form-error"></div>
     </form>
@@ -354,6 +466,12 @@ function replyFormHtml(thread) {
 }
 
 function postFooterHtml(post) {
+  const canEdit = state.me && (state.me.id === post.user_id || isStaff());
+
+  const editButton = canEdit
+    ? `<button class="link" data-edit-post="${post.id}">Редактировать</button>`
+    : '';
+
   const reportButton = state.me
     ? `<button class="link" data-report-post="${post.id}">Пожаловаться</button>`
     : '';
@@ -362,10 +480,12 @@ function postFooterHtml(post) {
     ? `<button class="link danger" data-admin-post="${post.id}" data-admin-action="delete">Удалить</button>`
     : '';
 
-  return [reportButton, adminDelete].filter(Boolean).join('');
+  return [editButton, reportButton, adminDelete].filter(Boolean).join('');
 }
 
 function postHtml(thread, post) {
+  const edited = post.updated_at > post.created_at ? '<span class="edited">(изменено)</span>' : '';
+
   return `
     <article class="post" id="post-${post.id}">
       <header>
@@ -373,10 +493,10 @@ function postHtml(thread, post) {
           ${esc(post.username)}
           ${post.is_admin ? '<span class="badge admin">admin</span>' : ''}
         </div>
-        <time>${time(post.created_at)}</time>
+        <time>${time(post.created_at)} ${edited}</time>
       </header>
 
-      <div class="post-body">${textToHtml(post.body)}</div>
+      <div class="post-body">${mdToHtml(post.body)}</div>
 
       <footer>
         ${postFooterHtml(post)}
@@ -429,11 +549,11 @@ function renderThread(id, query) {
       </section>
     `;
 
-    bindThreadPage(thread);
+    bindThreadPage(thread, posts);
   };
 }
 
-function bindThreadPage(thread) {
+function bindThreadPage(thread, posts) {
   const replyForm = document.getElementById('reply-form');
 
   if (replyForm) {
@@ -463,6 +583,13 @@ function bindThreadPage(thread) {
     });
   });
 
+  document.querySelectorAll('[data-edit-post]').forEach((button) => {
+    button.addEventListener('click', () => {
+      const post = posts.find((p) => p.id === Number(button.dataset.editPost));
+      if (post) startEditPost(post);
+    });
+  });
+
   document.querySelectorAll('[data-admin-thread]').forEach((button) => {
     button.addEventListener('click', () => {
       adminAction('thread', Number(button.dataset.adminThread), button.dataset.adminAction);
@@ -473,6 +600,43 @@ function bindThreadPage(thread) {
     button.addEventListener('click', () => {
       adminAction('post', Number(button.dataset.adminPost), button.dataset.adminAction);
     });
+  });
+}
+
+function startEditPost(post) {
+  const article = document.getElementById(`post-${post.id}`);
+  if (!article) return;
+
+  const bodyEl = article.querySelector('.post-body');
+
+  bodyEl.innerHTML = `
+    <textarea id="edit-body-${post.id}" class="input edit-area" maxlength="10000">${esc(post.body)}</textarea>
+    <div class="admin-controls">
+      <button class="btn small" data-edit-save="${post.id}">Сохранить</button>
+      <button class="btn ghost small" data-edit-cancel="${post.id}">Отмена</button>
+    </div>
+    <div class="form-error" id="edit-error-${post.id}"></div>
+  `;
+
+  document.querySelector(`[data-edit-save="${post.id}"]`).addEventListener('click', async () => {
+    const newBody = document.getElementById(`edit-body-${post.id}`).value;
+    const errorEl = document.getElementById(`edit-error-${post.id}`);
+
+    try {
+      await api('/api/posts', {
+        method: 'PATCH',
+        body: JSON.stringify({ postId: post.id, body: newBody })
+      });
+
+      toast('Пост обновлён');
+      await render();
+    } catch (error) {
+      errorEl.textContent = error.message;
+    }
+  });
+
+  document.querySelector(`[data-edit-cancel="${post.id}"]`).addEventListener('click', () => {
+    render();
   });
 }
 
@@ -558,6 +722,39 @@ function userRowHtml(user) {
   `;
 }
 
+function auditRowHtml(log) {
+  return `
+    <article class="admin-row">
+      <div class="admin-row-head">
+        <span class="badge">${esc(log.action)}</span>
+        <span class="muted">${log.username ? '@' + esc(log.username) : 'system'}</span>
+        <span class="muted">${esc(log.ip || '')}</span>
+        <time>${time(log.created_at)}</time>
+      </div>
+      ${log.details ? `<div class="meta">${esc(log.details)}</div>` : ''}
+    </article>
+  `;
+}
+
+async function exportBackup() {
+  try {
+    const data = await api('/api/admin?type=export');
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `penthub-backup-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+
+    URL.revokeObjectURL(url);
+    toast('Экспорт готов');
+  } catch (error) {
+    toast(error.message, true);
+  }
+}
+
 function renderAdmin(query) {
   return async function adminView() {
     if (!isStaff()) {
@@ -570,15 +767,15 @@ function renderAdmin(query) {
       return;
     }
 
-    const tab = query.get('tab') === 'users' ? 'users' : 'reports';
+    const tab = query.get('tab') === 'users' ? 'users' : query.get('tab') === 'audit' ? 'audit' : 'reports';
     const page = Math.max(1, Number(query.get('page') || 1) || 1);
     const status = query.get('status') || 'open';
 
-    if (tab === 'users' && !state.me.isAdmin) {
+    if ((tab === 'users' || tab === 'audit') && !state.me.isAdmin) {
       app.innerHTML = `
         <section class="card page-card narrow">
           <h1>403</h1>
-          <p class="error">Управление пользователями — только админ.</p>
+          <p class="error">Этот раздел — только для админа.</p>
         </section>
       `;
       return;
@@ -602,7 +799,7 @@ function renderAdmin(query) {
         : '<section class="empty">Жалоб нет.</section>';
 
       content += paginationHtml(`#/admin?tab=reports&status=${encodeURIComponent(status)}`, page, data.hasMore);
-    } else {
+    } else if (tab === 'users') {
       const q = query.get('q') || '';
       const data = await api(`/api/admin?type=users&page=${page}&q=${encodeURIComponent(q)}`);
       const users = data.users || [];
@@ -618,14 +815,27 @@ function renderAdmin(query) {
         : '<section class="empty">Никого не нашли.</section>';
 
       content += paginationHtml(`#/admin?tab=users&q=${encodeURIComponent(q)}`, page, data.hasMore);
+    } else {
+      const data = await api(`/api/admin?type=audit&page=${page}`);
+      const logs = data.logs || [];
+
+      content = logs.length
+        ? logs.map(auditRowHtml).join('')
+        : '<section class="empty">Журнал пуст.</section>';
+
+      content += paginationHtml('#/admin?tab=audit', page, data.hasMore);
     }
 
     app.innerHTML = `
-      <section class="section-head"><h1>Админка</h1></section>
+      <section class="section-head">
+        <h1>Админка</h1>
+        ${state.me.isAdmin ? '<button id="export-btn" class="btn ghost small">Скачать бэкап (JSON)</button>' : ''}
+      </section>
 
       <nav class="tabs">
         <a class="tab ${tab === 'reports' ? 'active' : ''}" href="#/admin?tab=reports">Жалобы</a>
         ${state.me.isAdmin ? `<a class="tab ${tab === 'users' ? 'active' : ''}" href="#/admin?tab=users">Пользователи</a>` : ''}
+        ${state.me.isAdmin ? `<a class="tab ${tab === 'audit' ? 'active' : ''}" href="#/admin?tab=audit">Журнал</a>` : ''}
       </nav>
 
       <section class="admin-list">${content}</section>
@@ -656,6 +866,12 @@ function bindAdminPage() {
       const q = document.getElementById('admin-user-q').value.trim();
       location.hash = `#/admin?tab=users&q=${encodeURIComponent(q)}`;
     });
+  }
+
+  const exportBtn = document.getElementById('export-btn');
+
+  if (exportBtn) {
+    exportBtn.addEventListener('click', exportBackup);
   }
 }
 
@@ -899,6 +1115,10 @@ function renderNewThread(query) {
             Текст первого поста
             <textarea id="thread-body" required minlength="1" maxlength="10000"></textarea>
           </label>
+
+          <p class="muted">
+            Markdown: **жирный**, *курсив*, \`код\`, \`\`\`блоки кода\`\`\`, списки (- и 1.), &gt; цитаты, [ссылка](https://example.com)
+          </p>
 
           <button class="btn" type="submit">Опубликовать</button>
           <div id="form-error" class="form-error"></div>
