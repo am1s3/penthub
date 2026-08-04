@@ -9,8 +9,12 @@ import {
   validPassword,
   randomHex,
   hashPassword,
+  sha256Hex,
   audit,
-  createSession
+  createSession,
+  verifyTurnstile,
+  generateRecoveryCode,
+  normalizeRecoveryCode
 } from '../../_utils.js';
 
 export async function onRequest({ request, env }) {
@@ -34,6 +38,10 @@ export async function onRequest({ request, env }) {
     body = await readJson(request);
   } catch {
     return json({ error: 'Некорректный JSON' }, 400);
+  }
+
+  if (!(await verifyTurnstile(env, request, body.turnstileToken))) {
+    return json({ error: 'Проверка не пройдена. Обнови страницу и попробуй снова.' }, 400);
   }
 
   const username = cleanText(body.username, 32, false);
@@ -70,6 +78,10 @@ export async function onRequest({ request, env }) {
 
     const salt = randomHex(16);
     const passwordHash = await hashPassword(password, salt);
+
+    const recoveryCode = generateRecoveryCode();
+    const recoveryHash = await sha256Hex(normalizeRecoveryCode(recoveryCode));
+
     const now = Date.now();
 
     const inserted = await env.DB.prepare(
@@ -82,12 +94,13 @@ export async function onRequest({ request, env }) {
           banned,
           created_at,
           accepted_terms_at,
-          bio
-        ) VALUES (?, ?, ?, ?, 0, ?, ?, '')
+          bio,
+          recovery_hash
+        ) VALUES (?, ?, ?, ?, 0, ?, ?, '', ?)
         RETURNING id
       `
     )
-      .bind(username, passwordHash, salt, isAdmin, now, now)
+      .bind(username, passwordHash, salt, isAdmin, now, now, recoveryHash)
       .first();
 
     if (!inserted) {
@@ -107,7 +120,8 @@ export async function onRequest({ request, env }) {
       {
         id: inserted.id,
         username,
-        isAdmin: Boolean(isAdmin)
+        isAdmin: Boolean(isAdmin),
+        recoveryCode
       },
       201,
       { 'Set-Cookie': cookie }
