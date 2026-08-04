@@ -4677,3 +4677,87 @@ function renderThread(id, query) {
     }
   };
 }
+// === PART 8: FINAL — client-side image resize + robust attach ===
+
+function downscaleImage(file, maxDim = 1280, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const img = new Image();
+
+      img.onload = () => {
+        try {
+          let { width, height } = img;
+          const scale = Math.min(1, maxDim / Math.max(width, height));
+          width = Math.max(1, Math.round(width * scale));
+          height = Math.max(1, Math.round(height * scale));
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+
+          let q = quality;
+          let out = canvas.toDataURL('image/jpeg', q);
+
+          while (out.length > 900000 && q > 0.4) {
+            q -= 0.15;
+            out = canvas.toDataURL('image/jpeg', q);
+          }
+
+          resolve(out);
+        } catch {
+          reject(new Error('Resize failed'));
+        }
+      };
+
+      img.onerror = () => reject(new Error('Bad image file'));
+      img.src = reader.result;
+    };
+
+    reader.onerror = () => reject(new Error('Read error'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function bindAttachPicker(pid) {
+  if (typeof attachStore === 'undefined') return;
+
+  attachStore[pid] = attachStore[pid] || [];
+
+  const input = document.querySelector(`[data-attach-input="${pid}"]`);
+  if (!input) return;
+
+  input.addEventListener('change', async () => {
+    const file = input.files[0];
+    if (!file) return;
+
+    if ((attachStore[pid] || []).length >= 4) {
+      toast('Max 4 images per message', true);
+      input.value = '';
+      return;
+    }
+
+    try {
+      const dataUrl = await downscaleImage(file);
+      const res = await api('/api/upload', { method: 'POST', body: JSON.stringify({ dataUrl }) });
+
+      if (!res || !res.url) {
+        throw new Error('Upload failed: no url returned');
+      }
+
+      attachStore[pid].push(res.url);
+
+      if (typeof renderAttachPreview === 'function') renderAttachPreview(pid);
+      toast('Image attached');
+    } catch (e) {
+      console.error('PentHub upload error:', e);
+      toast(e.message || 'Upload failed', true);
+    }
+
+    input.value = '';
+  });
+
+  if (typeof renderAttachPreview === 'function') renderAttachPreview(pid);
+}
