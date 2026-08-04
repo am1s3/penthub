@@ -33,11 +33,11 @@ export async function onRequest({ request, env }) {
 async function handleGet(request, env) {
   const user = await getSessionUser(env, request);
 
-  if (!user) return json({ error: 'Требуется вход' }, 401);
-  if (!isStaff(user)) return json({ error: 'Нет прав' }, 403);
+  if (!user) return json({ error: 'Login required' }, 401);
+  if (!isStaff(user)) return json({ error: 'No permission' }, 403);
 
   if (!(await rateLimit(env, `admin-get:${user.id}`, 300, 3600))) {
-    return json({ error: 'Слишком много запросов' }, 429);
+    return json({ error: 'Too many requests' }, 429);
   }
 
   const url = new URL(request.url);
@@ -83,7 +83,7 @@ async function handleGet(request, env) {
 
     if (type === 'users') {
       if (!user.isAdmin) {
-        return json({ error: 'Пользователи — только админ' }, 403);
+        return json({ error: 'Users section is admin-only' }, 403);
       }
 
       const q = cleanText(url.searchParams.get('q') || '', 32, false) || '';
@@ -121,7 +121,7 @@ async function handleGet(request, env) {
 
     if (type === 'audit') {
       if (!user.isAdmin) {
-        return json({ error: 'Журнал — только админ' }, 403);
+        return json({ error: 'Audit log is admin-only' }, 403);
       }
 
       const result = await env.DB.prepare(
@@ -149,11 +149,11 @@ async function handleGet(request, env) {
 
     if (type === 'export') {
       if (!user.isAdmin) {
-        return json({ error: 'Экспорт — только админ' }, 403);
+        return json({ error: 'Export is admin-only' }, 403);
       }
 
       if (!(await rateLimit(env, `export:${user.id}`, 3, 3600))) {
-        return json({ error: 'Экспорт ограничен: 3 раза в час' }, 429);
+        return json({ error: 'Export is limited to 3 times per hour' }, 429);
       }
 
       const [categories, users, threads, posts, reports] = await Promise.all([
@@ -163,6 +163,8 @@ async function handleGet(request, env) {
         env.DB.prepare('SELECT id, thread_id, user_id, body, created_at, updated_at, deleted FROM posts ORDER BY id').all(),
         env.DB.prepare('SELECT id, post_id, reporter_id, reason, status, created_at FROM reports ORDER BY id').all()
       ]);
+
+      await audit(env, { userId: user.id, action: 'export_backup', request });
 
       return json({
         exported_at: new Date().toISOString(),
@@ -175,9 +177,9 @@ async function handleGet(request, env) {
       });
     }
 
-    return json({ error: 'Неизвестный type' }, 400);
+    return json({ error: 'Unknown type' }, 400);
   } catch {
-    return json({ error: 'Внутренняя ошибка' }, 500);
+    return json({ error: 'Internal error' }, 500);
   }
 }
 
@@ -188,11 +190,11 @@ async function handlePost(request, env) {
 
   const user = await getSessionUser(env, request);
 
-  if (!user) return json({ error: 'Требуется вход' }, 401);
-  if (!isStaff(user)) return json({ error: 'Нет прав' }, 403);
+  if (!user) return json({ error: 'Login required' }, 401);
+  if (!isStaff(user)) return json({ error: 'No permission' }, 403);
 
   if (!(await rateLimit(env, `admin-post:${user.id}`, 300, 3600))) {
-    return json({ error: 'Слишком много действий' }, 429);
+    return json({ error: 'Too many actions' }, 429);
   }
 
   let body;
@@ -200,7 +202,7 @@ async function handlePost(request, env) {
   try {
     body = await readJson(request);
   } catch {
-    return json({ error: 'Некорректный JSON' }, 400);
+    return json({ error: 'Invalid JSON' }, 400);
   }
 
   const type = body.type;
@@ -208,35 +210,35 @@ async function handlePost(request, env) {
   const action = (cleanText(body.action, 20, false) || '').toLowerCase();
 
   if (!type || !Number.isInteger(id) || !action) {
-    return json({ error: 'Некорректный запрос' }, 400);
+    return json({ error: 'Invalid request' }, 400);
   }
 
   try {
     if (type === 'thread') {
       if (!THREAD_ACTIONS.includes(action)) {
-        return json({ error: 'Неизвестное действие' }, 400);
+        return json({ error: 'Unknown action' }, 400);
       }
 
       const row = await env.DB.prepare('SELECT id FROM threads WHERE id = ?').bind(id).first();
-      if (!row) return json({ error: 'Тред не найден' }, 404);
+      if (!row) return json({ error: 'Thread not found' }, 404);
 
       await env.DB.prepare(`UPDATE threads SET ${THREAD_FIELD[action]} WHERE id = ?`)
         .bind(id)
         .run();
     } else if (type === 'post') {
       if (!POST_ACTIONS.includes(action)) {
-        return json({ error: 'Неизвестное действие' }, 400);
+        return json({ error: 'Unknown action' }, 400);
       }
 
       const row = await env.DB.prepare('SELECT id FROM posts WHERE id = ?').bind(id).first();
-      if (!row) return json({ error: 'Пост не найден' }, 404);
+      if (!row) return json({ error: 'Post not found' }, 404);
 
       await env.DB.prepare('UPDATE posts SET deleted = ? WHERE id = ?')
         .bind(action === 'delete' ? 1 : 0, id)
         .run();
     } else if (type === 'report') {
       if (!REPORT_ACTIONS.includes(action)) {
-        return json({ error: 'Неизвестное действие' }, 400);
+        return json({ error: 'Unknown action' }, 400);
       }
 
       const status = action === 'resolve' ? 'resolved' : 'dismissed';
@@ -246,11 +248,11 @@ async function handlePost(request, env) {
         .run();
     } else if (type === 'user') {
       if (!user.isAdmin) {
-        return json({ error: 'Пользователи — только админ' }, 403);
+        return json({ error: 'Users section is admin-only' }, 403);
       }
 
       if (!USER_ACTIONS.includes(action)) {
-        return json({ error: 'Неизвестное действие' }, 400);
+        return json({ error: 'Unknown action' }, 400);
       }
 
       const target = await env.DB.prepare(
@@ -259,14 +261,14 @@ async function handlePost(request, env) {
         .bind(id)
         .first();
 
-      if (!target) return json({ error: 'Пользователь не найден' }, 404);
+      if (!target) return json({ error: 'User not found' }, 404);
 
       if (target.id === user.id && (action === 'ban' || action === 'mod_demote')) {
-        return json({ error: 'Нельзя применить к себе' }, 400);
+        return json({ error: 'Cannot apply this to yourself' }, 400);
       }
 
       if (target.is_admin && action === 'ban') {
-        return json({ error: 'Нельзя забанить админа. Сначала сними админку.' }, 400);
+        return json({ error: 'Cannot ban an admin. Remove admin rights first.' }, 400);
       }
 
       if (action === 'ban') {
@@ -286,7 +288,7 @@ async function handlePost(request, env) {
         await env.DB.prepare('UPDATE users SET is_moderator = 0 WHERE id = ?').bind(id).run();
       }
     } else {
-      return json({ error: 'Неизвестный type' }, 400);
+      return json({ error: 'Unknown type' }, 400);
     }
 
     await audit(env, {
@@ -298,6 +300,6 @@ async function handlePost(request, env) {
 
     return json({ ok: true });
   } catch {
-    return json({ error: 'Внутренняя ошибка' }, 500);
+    return json({ error: 'Internal error' }, 500);
   }
 }
