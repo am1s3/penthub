@@ -38,23 +38,18 @@ export async function storeMentions(env, postId, text, authorId, threadId = null
 
   for (const u of rows.results || []) {
     if (u.id === authorId) continue;
-
     await env.DB.prepare('INSERT OR IGNORE INTO mentions (post_id, user_id, created_at) VALUES (?, ?, ?)')
       .bind(postId, u.id, now).run();
-
     await notify(env, { userId: u.id, actorId: authorId, type: 'mention', postId, threadId });
   }
 }
 
 async function notify(env, { userId, actorId, type, postId, threadId }) {
   if (!userId || userId === actorId) return;
-
   try {
     const col = type === 'reply' ? 'notify_reply' : type === 'mention' ? 'notify_mention' : 'notify_reaction';
     const row = await env.DB.prepare(`SELECT ${col} AS flag FROM users WHERE id = ?`).bind(userId).first();
-
     if (row && row.flag === 0) return;
-
     await env.DB.prepare(
       'INSERT INTO notifications (user_id, actor_id, type, post_id, thread_id, created_at, read_at) VALUES (?, ?, ?, ?, ?, ?, NULL)'
     ).bind(userId, actorId, type, postId, threadId, Date.now()).run();
