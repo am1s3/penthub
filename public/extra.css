@@ -1,51 +1,105 @@
-.attach-grid {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 10px;
+/* ===== attachments ===== */
+
+.attach-grid { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+
+.attach-grid a img, .attach-item img {
+  width: 96px; height: 96px; object-fit: cover;
+  border-radius: 8px; border: 1px solid var(--border);
+  display: block; transition: transform .15s ease, border-color .15s ease;
 }
 
-.attach-grid a img,
-.attach-item img {
-  width: 96px;
-  height: 96px;
-  object-fit: cover;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  display: block;
-  transition: transform 0.15s ease, border-color 0.15s ease;
-}
-
-.attach-grid a:hover img {
-  transform: scale(1.05);
-  border-color: var(--blue);
-}
+.attach-grid a:hover img { transform: scale(1.05); border-color: var(--blue); }
 
 .attach-item { position: relative; display: inline-block; }
 
 .attach-remove {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 20px;
-  height: 20px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--panel-2);
-  color: var(--danger);
-  font-size: 11px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
+  position: absolute; top: -6px; right: -6px;
+  width: 20px; height: 20px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel-2);
+  color: var(--danger); font-size: 11px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 
 .attach-remove:hover { background: var(--danger); color: #fff; }
 
 .modal-form { display: grid; gap: 12px; margin-top: 8px; }
 
-.btn.confirm-arm {
-  border-color: var(--danger);
-  color: var(--danger);
-  background: rgba(248, 81, 73, 0.15);
+.btn.confirm-arm { border-color: var(--danger); color: var(--danger); background: rgba(248,81,73,.15); }
+
+/* ===== FIX: sticky compact footer, centered ===== */
+
+html, body { height: 100%; }
+
+body { display: flex; flex-direction: column; min-height: 100vh; }
+
+.shell { flex: 1 0 auto; }
+
+.footer { flex-shrink: 0; margin-top: 24px; padding: 8px 0; }
+
+.footer .shell {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 2px; padding: 0 16px; grid-template-columns: none;
+  justify-content: center; text-align: center;
+}
+
+/* ===== FIX: sidebar account pinned to bottom, bigger buttons ===== */
+
+.sidebar { min-height: calc(100vh - 110px); }
+
+.side-item { font-size: 14.5px; padding: 9px 14px; }
+
+.side-item svg { width: 18px; height: 18px; }
+
+.side-account {
+  margin-top: auto;
+  display: flex; flex-direction: column; gap: 2px;
+  padding-top: 12px; border-top: 1px solid var(--border);
+}
+
+/* ===== FIX: stacking context / menu falling behind ===== */
+
+.menu { z-index: 80; }
+
+.card, .post, .feed-row, .admin-row, .box, .feature-card, .composer, .modal-card, .toast, .profile-card {
+  animation: rise .35s ease backwards;
+}
+
+/* ===== professional borders for actions/reactions ===== */
+
+.action {
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  border-radius: 999px;
+  padding: 4px 12px;
+  transition: border-color .15s ease, color .15s ease, background .15s ease;
+}
+
+.action:hover { border-color: var(--blue); background: var(--panel-2); }
+
+.action.active { border-color: rgba(63,185,80,.5); color: var(--green); }
+
+.action.danger:hover { border-color: rgba(248,81,73,.5); }
+
+details.menu-wrap summary.action { list-style: none; }
+details.menu-wrap summary.action::-webkit-details-marker { display: none; }
+
+/* ===== settings extras ===== */
+
+.danger-zone { border-color: rgba(248,81,73,.4); }
+
+.session-current { color: var(--green); }
+
+.settings-nav .tab { font-size: 14px; }
+
+/* ===== mobile ===== */
+
+@media (max-width: 760px) {
+  .sidebar { min-height: 0; }
+
+  .side-account {
+    margin-top: 0; border-top: 0; padding-top: 0;
+    flex-direction: row; gap: 6px;
+  }
+
+  .side-item { font-size: 13px; padding: 6px 10px; }
 }
