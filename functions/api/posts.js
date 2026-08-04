@@ -5,6 +5,13 @@ import {
 
 const POSTS_PER_PAGE = 20;
 
+export function cleanAttachments(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .filter((u) => typeof u === 'string' && u.startsWith('/api/files/'))
+    .slice(0, 4);
+}
+
 export function extractMentions(text) {
   if (!text) return [];
   const set = new Set();
@@ -70,7 +77,7 @@ async function getPosts(request, env) {
 
     const result = await env.DB.prepare(
       `SELECT
-         p.id, p.thread_id, p.user_id, p.body, p.created_at, p.updated_at,
+         p.id, p.thread_id, p.user_id, p.body, p.attachments, p.created_at, p.updated_at,
          u.username, u.is_admin
        FROM posts p
        JOIN users u ON u.id = p.user_id
@@ -85,6 +92,7 @@ async function getPosts(request, env) {
 
     posts = posts.map((p) => ({
       ...p,
+      attachments: safeParseAttachments(p.attachments),
       is_admin: Boolean(p.is_admin),
       avatar: meta[p.user_id]?.avatar || '',
       display_name: meta[p.user_id]?.display_name || p.username,
@@ -130,6 +138,15 @@ async function getPosts(request, env) {
   }
 }
 
+function safeParseAttachments(raw) {
+  try {
+    const list = JSON.parse(raw || '[]');
+    return Array.isArray(list) ? list.filter((u) => typeof u === 'string' && u.startsWith('/api/files/')).slice(0, 4) : [];
+  } catch {
+    return [];
+  }
+}
+
 async function createPost(request, env) {
   if (!checkOrigin(request)) return json({ error: 'Bad origin' }, 403);
 
@@ -145,6 +162,7 @@ async function createPost(request, env) {
 
   const threadId = Number.parseInt(body.threadId, 10);
   const postBody = cleanText(body.body, 10000, true);
+  const attachments = cleanAttachments(body.attachments);
 
   if (!Number.isInteger(threadId)) return json({ error: 'Invalid threadId' }, 400);
   if (!postBody) return json({ error: 'Post must be 1-10000 characters' }, 400);
@@ -163,18 +181,16 @@ async function createPost(request, env) {
     const now = Date.now();
 
     const inserted = await env.DB.prepare(
-      `INSERT INTO posts (thread_id, user_id, body, created_at, updated_at, deleted)
-       VALUES (?, ?, ?, ?, ?, 0) RETURNING id`
-    ).bind(threadId, user.id, postBody, now, now).first();
+      `INSERT INTO posts (thread_id, user_id, body, attachments, created_at, updated_at, deleted)
+       VALUES (?, ?, ?, ?, ?, ?, 0) RETURNING id`
+    ).bind(threadId, user.id, postBody, JSON.stringify(attachments), now, now).first();
 
     if (!inserted) return json({ error: 'Failed to create post' }, 500);
 
     await env.DB.prepare('UPDATE threads SET updated_at = ? WHERE id = ?').bind(now, threadId).run();
 
     await storeMentions(env, inserted.id, postBody, user.id);
-
     await notify(env, { userId: thread.user_id, actorId: user.id, type: 'reply', postId: inserted.id, threadId });
-
     await audit(env, { userId: user.id, action: 'create_post', request, details: `${threadId}:${inserted.id}` });
 
     return json({ id: inserted.id }, 201);
@@ -214,9 +230,15 @@ async function editPost(request, env) {
     if (post.user_id !== user.id && !isStaff(user)) return json({ error: 'No permission to edit this post' }, 403);
 
     const now = Date.now();
+    const attachments = body.attachments !== undefined ? cleanAttachments(body.attachments) : null;
 
-    await env.DB.prepare('UPDATE posts SET body = ?, updated_at = ? WHERE id = ?')
-      .bind(newBody, now, postId).run();
+    if (attachments) {
+      await env.DB.prepare('UPDATE posts SET body = ?, attachments = ?, updated_at = ? WHERE id = ?')
+        .bind(newBody, JSON.stringify(attachments), now, postId).run();
+    } else {
+      await env.DB.prepare('UPDATE posts SET body = ?, updated_at = ? WHERE id = ?')
+        .bind(newBody, now, postId).run();
+    }
 
     await audit(env, { userId: user.id, action: 'edit_post', request, details: String(postId) });
 
