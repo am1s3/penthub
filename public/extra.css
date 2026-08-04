@@ -26,7 +26,7 @@
 
 .btn.confirm-arm { border-color: var(--danger); color: var(--danger); background: rgba(248,81,73,.15); }
 
-/* ===== FIX: sticky compact footer, centered ===== */
+/* ===== sticky compact centered footer ===== */
 
 html, body { height: 100%; }
 
@@ -42,7 +42,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
   justify-content: center; text-align: center;
 }
 
-/* ===== FIX: sidebar account pinned to bottom, bigger buttons ===== */
+/* ===== sidebar: account pinned bottom, bigger items ===== */
 
 .sidebar { min-height: calc(100vh - 110px); }
 
@@ -56,7 +56,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
   padding-top: 12px; border-top: 1px solid var(--border);
 }
 
-/* ===== FIX: stacking context / menu falling behind ===== */
+/* ===== stacking / menu layer fix ===== */
 
 .menu { z-index: 80; }
 
@@ -64,7 +64,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
   animation: rise .35s ease backwards;
 }
 
-/* ===== professional borders for actions/reactions ===== */
+/* ===== professional pill borders ===== */
 
 .action {
   border: 1px solid var(--border);
@@ -74,7 +74,7 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
   transition: border-color .15s ease, color .15s ease, background .15s ease;
 }
 
-.action:hover { border-color: var(--blue); background: var(--panel-2); }
+.action:hover { border-color: var(--blue); }
 
 .action.active { border-color: rgba(63,185,80,.5); color: var(--green); }
 
@@ -82,6 +82,22 @@ body { display: flex; flex-direction: column; min-height: 100vh; }
 
 details.menu-wrap summary.action { list-style: none; }
 details.menu-wrap summary.action::-webkit-details-marker { display: none; }
+
+/* ===== hero actions (no inline styles needed) ===== */
+
+.hero-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 18px;
+}
+
+.hero-avatar-row {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 10px;
+}
 
 /* ===== settings extras ===== */
 
@@ -102,4 +118,6 @@ details.menu-wrap summary.action::-webkit-details-marker { display: none; }
   }
 
   .side-item { font-size: 13px; padding: 6px 10px; }
+
+  .hero-actions { margin-top: 14px; }
 }
