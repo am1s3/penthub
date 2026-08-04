@@ -13,29 +13,24 @@
     <a class="logo" href="#/">Pent<span>Hub</span></a>
 
     <form id="search-form" autocomplete="off">
-      <input
-        id="search-input"
-        type="search"
-        placeholder="Search the forum"
-        minlength="3"
-        maxlength="64"
-        class="input"
-      />
+      <input id="search-input" type="search" placeholder="Search PentHub" minlength="3" maxlength="64" />
     </form>
 
-    <nav id="auth-area" class="auth-area" aria-label="User menu"></nav>
+    <nav id="top-actions" class="top-actions" aria-label="Quick actions"></nav>
   </header>
 
-  <main id="app" class="container" aria-live="polite"></main>
+  <div class="shell">
+    <aside id="sidebar" class="sidebar" aria-label="Navigation"></aside>
+    <main id="app" aria-live="polite"></main>
+    <aside id="rightbar" class="rightbar" aria-label="Categories"></aside>
+  </div>
 
   <footer class="footer">
-    <div class="container">
+    <div class="shell">
       <p>
         PentHub is a platform for legal research, education and defensive security.
         Any actions outside the law or without written permission are prohibited.
-      </p>
-      <p>
-        <a href="#/rules">Rules</a>
+        <a href="/api/rss">RSS</a> · <a href="#/rules">Rules</a>
       </p>
     </div>
   </footer>
@@ -44,7 +39,7 @@
     <div class="modal-card">
       <h3>Report a post</h3>
       <p class="muted">Describe the violation. Staff will review the content.</p>
-      <textarea id="modal-reason" class="input" maxlength="500" placeholder="Reason"></textarea>
+      <textarea id="modal-reason" maxlength="500" placeholder="Reason"></textarea>
       <div class="modal-actions">
         <button id="modal-cancel" class="btn ghost" type="button">Cancel</button>
         <button id="modal-send" class="btn danger" type="button">Send</button>
