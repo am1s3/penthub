@@ -1,3 +1,41 @@
+function toBytes(data) {
+  if (data == null) return null;
+
+  if (data instanceof ArrayBuffer) {
+    return new Uint8Array(data);
+  }
+
+  if (ArrayBuffer.isView(data)) {
+    return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  }
+
+  if (typeof data === 'string') {
+    let b64 = data;
+
+    if (b64.startsWith('data:')) {
+      b64 = b64.slice(b64.indexOf(',') + 1);
+    }
+
+    try {
+      const bin = atob(b64);
+      const out = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+      return out;
+    } catch {
+      return null;
+    }
+  }
+
+  if (typeof data === 'object') {
+    const vals = Object.values(data);
+    if (vals.length && vals.every((v) => typeof v === 'number')) {
+      return new Uint8Array(vals);
+    }
+  }
+
+  return null;
+}
+
 export async function onRequestGet({ params, env }) {
   const key = String(params.key || '').replace(/[^a-zA-Z0-9-]/g, '');
   if (!key) return new Response('Bad key', { status: 400 });
@@ -7,26 +45,15 @@ export async function onRequestGet({ params, env }) {
       .bind(key)
       .first();
 
-    if (!row || row.data == null) {
-      return new Response('Not found', { status: 404 });
-    }
+    if (!row) return new Response('Not found', { status: 404 });
 
-    let body;
+    const bytes = toBytes(row.data);
 
-    if (row.data instanceof ArrayBuffer) {
-      body = row.data;
-    } else if (ArrayBuffer.isView(row.data)) {
-      body = row.data.buffer;
-    } else if (typeof row.data === 'string') {
-      const bin = atob(row.data);
-      const bytes = new Uint8Array(bin.length);
-      for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
-      body = bytes.buffer;
-    } else {
+    if (!bytes || !bytes.length) {
       return new Response('Unreadable format', { status: 500 });
     }
 
-    return new Response(body, {
+    return new Response(bytes.buffer, {
       headers: {
         'Content-Type': row.mime || 'image/jpeg',
         'Cache-Control': 'public, max-age=2592000',
