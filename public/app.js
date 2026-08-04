@@ -4,8 +4,11 @@ const sidebar = document.getElementById('sidebar');
 const rightbar = document.getElementById('rightbar');
 const modal = document.getElementById('modal');
 const recoveryModal = document.getElementById('recovery-modal');
+const banBar = document.getElementById('ban-bar');
+const whatsnewBar = document.getElementById('whatsnew-bar');
+const shareMenu = document.getElementById('share-menu');
 
-const REACTION_EMOJIS = ['👍', '🔥', '', '', '❤️', '️'];
+const REACTION_EMOJIS = ['👍', '', '', '', '❤️', '️'];
 
 const ICONS = {
   home: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg>',
@@ -13,23 +16,32 @@ const ICONS = {
   mail: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>',
   user: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 5-5 8-5s6.5 1 8 5"/></svg>',
   shield: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/></svg>',
-  book: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3h14v18H5z"/><path d="M9 3v18"/></svg>'
+  book: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3h14v18H5z"/><path d="M9 3v18"/></svg>',
+  settings: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .4 1.9l.1.1a2 2 0 1 1-2.9 2.9l-.1-.1a1.7 1.7 0 0 0-1.9-.4 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.4l-.1.1a2 2 0 1 1-2.9-2.9l.1-.1a1.7 1.7 0 0 0 .4-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.4-1.9l-.1-.1a2 2 0 1 1 2.9-2.9l.1.1a1.7 1.7 0 0 0 1.9.4H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.4l.1-.1a2 2 0 1 1 2.9 2.9l-.1.1a1.7 1.7 0 0 0-.4 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>',
+  dots: '<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>',
+  share: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg>',
+  help: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M9.1 9a3 3 0 1 1 5.8 1c0 2-3 2-3 4"/><circle cx="12" cy="17" r="0.5"/></svg>'
 };
 
 const state = {
   me: null,
   categories: [],
+  sections: {},
   config: null,
   turnstileToken: null,
-  turnstileWidget: null
+  turnstileWidget: null,
+  changelogLatestId: 0,
+  changelogSeenId: Number(localStorage.getItem('penthub_changelog_seen') || 0),
+  welcomeSeen: Boolean(localStorage.getItem('penthub_welcome_seen'))
 };
 
 let reportPostId = null;
+let menuStack = [];
 
 function esc(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (char) => {
-    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char];
-  });
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[char]));
 }
 
 function mdInline(s) {
@@ -65,33 +77,17 @@ function mdToHtml(src) {
   };
 
   const closeList = () => {
-    if (listType) {
-      out.push(`</${listType}>`);
-      listType = null;
-    }
+    if (listType) { out.push(`</${listType}>`); listType = null; }
   };
 
   for (const line of lines) {
     const blockMatch = line.match(/^\u0000B(\d+)\u0000$/);
-    if (blockMatch) {
-      flushPara(); closeList();
-      out.push(`<pre class="code-block"><code>${blocks[Number(blockMatch[1])]}</code></pre>`);
-      continue;
-    }
+    if (blockMatch) { flushPara(); closeList(); out.push(`<pre class="code-block"><code>${blocks[Number(blockMatch[1])]}</code></pre>`); continue; }
 
     const h = line.match(/^(#{1,3})\s+(.+)$/);
-    if (h) {
-      flushPara(); closeList();
-      const level = h[1].length + 2;
-      out.push(`<h${level}>${mdInline(h[2])}</h${level}>`);
-      continue;
-    }
+    if (h) { flushPara(); closeList(); const level = h[1].length + 2; out.push(`<h${level}>${mdInline(h[2])}</h${level}>`); continue; }
 
-    if (/^&gt;\s?/.test(line)) {
-      flushPara(); closeList();
-      out.push(`<blockquote>${mdInline(line.replace(/^&gt;\s?/, ''))}</blockquote>`);
-      continue;
-    }
+    if (/^&gt;\s?/.test(line)) { flushPara(); closeList(); out.push(`<blockquote>${mdInline(line.replace(/^&gt;\s?/, ''))}</blockquote>`); continue; }
 
     const ul = line.match(/^[-*]\s+(.+)$/);
     if (ul) {
@@ -110,7 +106,6 @@ function mdToHtml(src) {
     }
 
     if (line.trim() === '') { flushPara(); closeList(); continue; }
-
     closeList();
     para.push(line);
   }
@@ -132,17 +127,33 @@ function toast(message, isError = false) {
   setTimeout(() => node.remove(), 3500);
 }
 
-function isStaff() {
-  return Boolean(state.me && (state.me.isAdmin || state.me.isModerator));
-}
+function isStaff() { return Boolean(state.me && (state.me.isAdmin || state.me.isModerator)); }
 
 const AV = ['av0', 'av1', 'av2', 'av3', 'av4', 'av5', 'av6', 'av7'];
 
-function avatarHtml(username, extra = '') {
+function avatarHtml(username, extra = '', avatarData = '') {
   const n = username || '?';
   let h = 0;
   for (const c of n) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return `<span class="avatar ${AV[h % 8]} ${extra}">${esc(n[0].toUpperCase())}</span>`;
+  const inner = avatarData ? `<img src="${esc(avatarData)}" alt="">` : esc(n[0].toUpperCase());
+  return `<span class="avatar ${AV[h % 8]} ${extra}">${inner}</span>`;
+}
+
+function displayName(user) {
+  return user.display_name || user.username;
+}
+
+function badgesHtml(badges, user) {
+  const list = [];
+
+  if (user?.is_admin) list.push(`<span class="badge-chip" style="color:var(--green);border-color:rgba(63,185,80,0.4)">★ admin</span>`);
+  if (user?.is_moderator) list.push(`<span class="badge-chip" style="color:var(--blue);border-color:rgba(88,166,255,0.4)">⚡ moderator</span>`);
+
+  for (const b of badges || []) {
+    list.push(`<span class="badge-chip" style="color:${esc(b.color)};border-color:${esc(b.color)}40">${esc(b.icon)} ${esc(b.label)}</span>`);
+  }
+
+  return list.length ? `<span class="badges">${list.join('')}</span>` : '';
 }
 
 async function api(path, options = {}) {
@@ -166,6 +177,53 @@ async function api(path, options = {}) {
 
 async function loadMe() {
   try { state.me = await api('/api/auth/me'); } catch { state.me = null; }
+  syncChromeState();
+}
+
+function syncChromeState() {
+  if (!state.me) {
+    banBar.classList.add('hidden');
+    whatsnewBar.classList.add('hidden');
+    return;
+  }
+
+  if (state.me.banned) {
+    banBar.classList.remove('hidden');
+    banBar.innerHTML = `
+      <div>
+        <strong>Account suspended.</strong> Reason: ${esc(state.me.ban_reason || '—')}
+        <span class="muted"> · ${state.me.banned_at ? time(state.me.banned_at) : ''}</span>
+      </div>
+      <div class="top-actions">
+        <a class="btn small" href="#/appeal">Appeal</a>
+        <a class="btn ghost small" href="#/settings">Settings</a>
+        <button id="ban-logout" class="btn danger small">Log out</button>
+      </div>
+    `;
+    document.getElementById('ban-logout')?.addEventListener('click', logout);
+  } else {
+    banBar.classList.add('hidden');
+  }
+
+  if (state.changelogLatestId > state.changelogSeenId) {
+    whatsnewBar.classList.remove('hidden');
+    whatsnewBar.innerHTML = `
+      <div>
+        <strong>What's new</strong> · version ${esc(state.me.changelog_latest_version || '')} is out.
+      </div>
+      <div class="top-actions">
+        <a class="btn small" href="#/changelog">See changes</a>
+        <button id="whatsnew-dismiss" class="btn ghost small">Dismiss</button>
+      </div>
+    `;
+    document.getElementById('whatsnew-dismiss')?.addEventListener('click', () => {
+      state.changelogSeenId = state.changelogLatestId;
+      localStorage.setItem('penthub_changelog_seen', String(state.changelogLatestId));
+      whatsnewBar.classList.add('hidden');
+    });
+  } else {
+    whatsnewBar.classList.add('hidden');
+  }
 }
 
 async function loadConfig() {
@@ -176,6 +234,7 @@ async function ensureCategories(force = false) {
   if (!state.categories.length || force) {
     const data = await api('/api/categories');
     state.categories = data.categories || [];
+    state.sections = data.sections || {};
   }
   return state.categories;
 }
@@ -183,9 +242,7 @@ async function ensureCategories(force = false) {
 function renderTurnstile() {
   const box = document.getElementById('turnstile-box');
   if (!box) return;
-
   const siteKey = state.config?.turnstileSiteKey;
-
   if (!siteKey || !window.turnstile) { box.innerHTML = ''; return; }
 
   if (state.turnstileWidget !== null) {
@@ -215,12 +272,12 @@ function showRecoveryModal(code) {
   recoveryModal.classList.remove('hidden');
 }
 
-function closeRecoveryModal() {
-  recoveryModal.classList.add('hidden');
-}
+function closeRecoveryModal() { recoveryModal.classList.add('hidden'); }
 
-function userLink(username) {
-  return `<a href="#/user/${encodeURIComponent(username)}">@${esc(username)}</a>`;
+function userLink(user) {
+  const u = typeof user === 'string' ? { username: user } : user;
+  const label = u.display_name ? `${esc(u.display_name)} <span class="muted">@${esc(u.username)}</span>` : `@${esc(u.username)}`;
+  return `<a href="#/user/${encodeURIComponent(u.username)}">${label}</a>`;
 }
 
 function updateTopbar() {
@@ -234,11 +291,7 @@ function updateTopbar() {
       <a class="icon-btn" href="#/notifications" title="Notifications">${ICONS.bell}${unreadNtf ? `<span class="icon-count">${unreadNtf}</span>` : ''}</a>
       <a class="icon-btn" href="#/messages" title="Messages">${ICONS.mail}${unreadPm ? `<span class="icon-count">${unreadPm}</span>` : ''}</a>
       <a class="btn small" href="#/new-thread">+ New</a>
-      <a class="icon-btn" href="#/user/${encodeURIComponent(state.me.username)}" title="Profile">${avatarHtml(state.me.username, 'small')}</a>
-      <button id="logout-btn" class="icon-btn" title="Logout">✕</button>
     `;
-
-    document.getElementById('logout-btn')?.addEventListener('click', logout);
   } else {
     topActions.innerHTML = `
       <a class="btn ghost small" href="#/login">Log in</a>
@@ -252,15 +305,47 @@ function updateSidebar() {
 
   const ntf = Number(state.me?.notifications_unread || 0);
   const pm = Number(state.me?.unread_count || 0);
+  const active = location.hash.replace(/^#\/?/, '').split('?')[0];
+
+  const top = [
+    { href: '', label: 'Home', icon: ICONS.home },
+    state.me ? { href: 'notifications', label: 'Notifications', icon: ICONS.bell, count: ntf } : null,
+    state.me ? { href: 'messages', label: 'Messages', icon: ICONS.mail, count: pm } : null,
+    { href: 'firmware', label: 'Firmware Hub', icon: ICONS.book },
+    { href: 'rules', label: 'Rules', icon: ICONS.shield },
+    { href: 'support', label: 'Support', icon: ICONS.help }
+  ].filter(Boolean);
+
+  const sections = Object.keys(state.sections || {}).sort();
+
+  const bottom = [
+    state.me ? { href: 'settings', label: 'Settings', icon: ICONS.settings } : null,
+    isStaff() ? { href: 'admin', label: 'Admin', icon: ICONS.shield } : null,
+    state.me ? { href: `user/${encodeURIComponent(state.me.username)}`, label: 'Profile', icon: ICONS.user } : null,
+    state.me ? { href: '__logout__', label: 'Log out', icon: '✕', danger: true } : null
+  ].filter(Boolean);
+
+  const sideItem = (item) => {
+    const cls = `side-item ${active === item.href || (item.href && active.startsWith(item.href + '/')) ? 'active' : ''} ${item.danger ? 'danger' : ''}`;
+    const count = item.count ? `<span class="side-count">${item.count}</span>` : '';
+    const style = item.danger ? 'style="color:var(--danger)"' : '';
+
+    if (item.href === '__logout__') {
+      return `<button class="${cls}" ${style} data-logout="1">${item.icon}<span>${item.label}</span></button>`;
+    }
+
+    return `<a class="${cls}" ${style} href="#/${item.href}">${item.icon}<span>${item.label}</span>${count}</a>`;
+  };
 
   sidebar.innerHTML = `
-    <a class="side-item" href="#/">${ICONS.home}<span>Home</span></a>
-    ${state.me ? `<a class="side-item" href="#/notifications">${ICONS.bell}<span>Notifications</span>${ntf ? `<span class="side-count">${ntf}</span>` : ''}</a>` : ''}
-    ${state.me ? `<a class="side-item" href="#/messages">${ICONS.mail}<span>Messages</span>${pm ? `<span class="side-count">${pm}</span>` : ''}</a>` : ''}
-    ${state.me ? `<a class="side-item" href="#/user/${encodeURIComponent(state.me.username)}">${ICONS.user}<span>Profile</span></a>` : ''}
-    ${isStaff() ? `<a class="side-item" href="#/admin">${ICONS.shield}<span>Admin</span></a>` : ''}
-    <a class="side-item" href="#/rules">${ICONS.book}<span>Rules</span></a>
+    ${top.map(sideItem).join('')}
+    ${sections.length ? `<div class="side-section">Categories</div>` : ''}
+    ${sections.map((s) => `<a class="side-item" href="#/section/${encodeURIComponent(s)}">${s}</a>`).join('')}
+    ${bottom.length ? `<div class="side-section">Account</div>` : ''}
+    ${bottom.map(sideItem).join('')}
   `;
+
+  sidebar.querySelectorAll('[data-logout]').forEach((b) => b.addEventListener('click', logout));
 }
 
 async function updateRightbar() {
@@ -268,25 +353,27 @@ async function updateRightbar() {
 
   try {
     const categories = await ensureCategories();
+    const sections = state.sections || {};
+
+    const sectionBoxes = Object.keys(sections).sort().map((s) => `
+      <div class="box">
+        <h3>${esc(s)}</h3>
+        ${sections[s].map((c) => `
+          <div class="box-row">
+            <a href="#/category/${encodeURIComponent(c.slug)}">${esc(c.name)}</a>
+            <span class="muted">${Number(c.thread_count || 0)}</span>
+          </div>
+        `).join('')}
+      </div>
+    `).join('');
 
     rightbar.innerHTML = `
-      <div class="box">
-        <h3>Categories</h3>
-        ${categories
-          .map(
-            (c) => `
-              <div class="box-row">
-                <a href="#/category/${encodeURIComponent(c.slug)}">${esc(c.name)}</a>
-                <span class="muted">${Number(c.thread_count || 0)}</span>
-              </div>
-            `
-          )
-          .join('')}
-      </div>
+      ${sectionBoxes}
       <div class="box">
         <h3>Legal & safety</h3>
         <p class="muted">Authorized research only. Your own devices, networks and accounts, or written permission.</p>
-        <p><a href="#/rules">Rules</a> · <a href="/api/rss">RSS</a></p>
+        <p><a href="#/rules">Rules</a> · <a href="#/terms">Terms</a> · <a href="#/privacy">Privacy</a></p>
+        <p><a href="/api/rss">RSS feed</a> · <a href="#/support">Support</a></p>
       </div>
     `;
   } catch {
@@ -299,6 +386,8 @@ async function logout() {
   state.me = null;
   updateTopbar();
   updateSidebar();
+  banBar.classList.add('hidden');
+  whatsnewBar.classList.add('hidden');
   location.hash = '#/';
 }
 
@@ -310,9 +399,7 @@ function parseRoute() {
   return { segments, query };
 }
 
-function pageLink(base, page) {
-  return `${base}${base.includes('?') ? '&' : '?'}page=${page}`;
-}
+function pageLink(base, page) { return `${base}${base.includes('?') ? '&' : '?'}page=${page}`; }
 
 function paginationHtml(base, page, hasMore) {
   if (page <= 1 && !hasMore) return '';
@@ -325,13 +412,73 @@ function paginationHtml(base, page, hasMore) {
   `;
 }
 
+function shareUrl(url, title) {
+  shareMenu.classList.remove('hidden');
+  shareMenu.innerHTML = `
+    <strong>Share</strong>
+    <button data-share-copy>Copy link</button>
+    <button data-share-twitter>Twitter / X</button>
+    <button data-share-reddit>Reddit</button>
+    <button data-share-hn>Hacker News</button>
+    <button data-share-close class="danger">Close</button>
+  `;
+
+  const encoded = encodeURIComponent(url);
+  const t = encodeURIComponent(title || '');
+
+  shareMenu.querySelector('[data-share-copy]').addEventListener('click', async () => {
+    try {
+      if (navigator.share) await navigator.share({ title, url });
+      else { await navigator.clipboard.writeText(url); toast('Link copied'); }
+    } catch {
+      await navigator.clipboard.writeText(url).catch(() => {});
+      toast('Link copied');
+    }
+    shareMenu.classList.add('hidden');
+  });
+
+  shareMenu.querySelector('[data-share-twitter]').addEventListener('click', () => {
+    window.open(`https://twitter.com/intent/tweet?text=${t}&url=${encoded}`, '_blank', 'noopener');
+    shareMenu.classList.add('hidden');
+  });
+
+  shareMenu.querySelector('[data-share-reddit]').addEventListener('click', () => {
+    window.open(`https://www.reddit.com/submit?url=${encoded}&title=${t}`, '_blank', 'noopener');
+    shareMenu.classList.add('hidden');
+  });
+
+  shareMenu.querySelector('[data-share-hn]').addEventListener('click', () => {
+    window.open(`https://news.ycombinator.com/submitlink?u=${encoded}&t=${t}`, '_blank', 'noopener');
+    shareMenu.classList.add('hidden');
+  });
+
+  shareMenu.querySelector('[data-share-close]').addEventListener('click', () => {
+    shareMenu.classList.add('hidden');
+  });
+}
+
+function shareButtonHtml(url, title) {
+  return `<button class="action" data-share-url="${esc(url)}" data-share-title="${esc(title)}">${ICONS.share} Share</button>`;
+}
+
+function attachShareHandlers(root = document) {
+  root.querySelectorAll('[data-share-url]').forEach((b) => {
+    b.addEventListener('click', (e) => {
+      e.preventDefault();
+      const full = b.dataset.shareUrl.startsWith('http') ? b.dataset.shareUrl : `${location.origin}${b.dataset.shareUrl}`;
+      shareUrl(full, b.dataset.shareTitle || '');
+    });
+  });
+}
+
 function threadRowHtml(t) {
   return `
     <a class="feed-row" href="#/thread/${Number(t.id)}">
-      ${avatarHtml(t.author)}
+      ${avatarHtml(t.author, '', t.author_avatar || '')}
       <div class="feed-main">
         <div class="feed-head">
-          <span class="feed-name">${esc(t.author || 'unknown')}</span>
+          <span class="feed-name">${esc(displayName(t))}</span>
+          ${badgesHtml(t.badges, t)}
           <span class="muted">· ${time(t.updated_at)}</span>
         </div>
         <h3 class="feed-title">
@@ -351,30 +498,74 @@ function threadRowHtml(t) {
 
 function renderHome() {
   return async function homeView() {
+    if (!state.welcomeSeen) { location.hash = '#/welcome'; return; }
+
     const data = await api('/api/threads?page=1');
     const threads = data.threads || [];
 
     app.innerHTML = `
       ${state.me ? `
         <div class="composer">
-          ${avatarHtml(state.me.username)}
+          ${avatarHtml(state.me.username, '', state.me.avatar || '')}
           <a class="fake" href="#/new-thread">Share a legal finding, lab report or question...</a>
           <a class="btn small" href="#/new-thread">Post</a>
         </div>
       ` : `
-        <div class="card" style="display:none"></div>
-        <div class="notice">
+        <div class="notice info">
           Welcome to PentHub — a forum for legal pentesting, hardware labs, CTF and defensive security.
           <a href="#/register">Join</a> to post. <a href="#/rules">Rules</a>.
         </div>
       `}
 
-      <section class="page-head"><h2>Latest threads</h2></section>
+      <section class="page-head">
+        <h2>Latest threads</h2>
+        ${shareButtonHtml(`${location.origin}/#/`, 'PentHub — legal pentesting forum')}
+      </section>
 
       ${threads.length ? threads.map(threadRowHtml).join('') : '<section class="empty">No threads yet.</section>'}
 
       ${paginationHtml('#/', 1, Boolean(data.hasMore))}
     `;
+
+    attachShareHandlers(app);
+  };
+}
+
+function renderSection(section, query) {
+  return async function sectionView() {
+    await ensureCategories();
+    const cats = (state.sections[section] || []);
+
+    if (!cats.length) throw new Error('Section not found');
+
+    const page = Math.max(1, Number(query.get('page') || 1) || 1);
+
+    const responses = await Promise.all(
+      cats.map((c) => api(`/api/threads?category=${encodeURIComponent(c.slug)}&page=${page}`))
+    );
+
+    const allThreads = responses.flatMap((r) => r.threads || []);
+
+    app.innerHTML = `
+      <section class="page-head">
+        <div>
+          <h1>${esc(section)}</h1>
+          <p class="muted">${cats.length} categories</p>
+        </div>
+      </section>
+
+      ${cats.map((c) => `
+        <div class="box" style="margin-bottom:10px">
+          <h3><a href="#/category/${encodeURIComponent(c.slug)}">${esc(c.name)}</a></h3>
+          <p class="muted">${esc(c.description)}</p>
+        </div>
+      `).join('')}
+
+      <section class="page-head"><h2>Latest in ${esc(section)}</h2></section>
+      ${allThreads.length ? allThreads.map(threadRowHtml).join('') : '<section class="empty">No threads in this section.</section>'}
+    `;
+
+    attachShareHandlers(app);
   };
 }
 
@@ -396,15 +587,20 @@ function renderCategory(slug, query) {
       <section class="page-head">
         <div>
           <h1>${esc(category.name)}</h1>
-          <p class="muted">${esc(category.description)}</p>
+          <p class="muted">${esc(category.description)} · section: ${esc(category.section)}</p>
         </div>
-        ${state.me ? `<a class="btn small" href="#/new-thread?category=${encodeURIComponent(slug)}">New thread</a>` : ''}
+        <div class="top-actions">
+          ${state.me ? `<a class="btn small" href="#/new-thread?category=${encodeURIComponent(slug)}">New thread</a>` : ''}
+          ${shareButtonHtml(`${location.origin}/#/category/${encodeURIComponent(slug)}`, category.name)}
+        </div>
       </section>
 
       ${threads.length ? threads.map(threadRowHtml).join('') : '<section class="empty">No threads yet.</section>'}
 
       ${paginationHtml(base, page, Boolean(data.hasMore))}
     `;
+
+    attachShareHandlers(app);
   };
 }
 
@@ -423,672 +619,23 @@ function renderTag(tag, query) {
   };
 }
 
-function threadAdminHtml(thread) {
-  if (!isStaff()) return '';
-
-  return `
-    <div class="admin-controls">
-      <button class="btn ghost small" data-admin-thread="${thread.id}" data-admin-action="${thread.is_locked ? 'unlock' : 'lock'}">
-        ${thread.is_locked ? 'Unlock' : 'Lock'}
-      </button>
-      <button class="btn ghost small" data-admin-thread="${thread.id}" data-admin-action="${thread.is_pinned ? 'unpin' : 'pin'}">
-        ${thread.is_pinned ? 'Unpin' : 'Pin'}
-      </button>
-      <button class="btn danger small" data-admin-thread="${thread.id}" data-admin-action="delete">Delete thread</button>
-    </div>
-  `;
+function openMenu(el) {
+  closeMenus();
+  el.classList.add('open');
+  menuStack.push(el);
 }
 
-function reactionsHtml(post) {
-  const counts = post.reactions || [];
-
-  const countButtons = counts
-    .map(
-      (r) => `
-        <button class="action ${post.my_reaction === r.emoji ? 'active' : ''}" data-react-post="${post.id}" data-react-emoji="${r.emoji}">
-          ${r.emoji} ${r.count}
-        </button>
-      `
-    )
-    .join('');
-
-  return `
-    <div class="action-bar">
-      ${countButtons}
-      <details>
-        <summary>+ react</summary>
-        <div class="action-bar">
-          ${REACTION_EMOJIS.map((e) => `<button class="action" data-react-post="${post.id}" data-react-emoji="${e}">${e}</button>`).join('')}
-        </div>
-      </details>
-    </div>
-  `;
+function closeMenus() {
+  for (const m of menuStack) m.classList.remove('open');
+  menuStack = [];
 }
 
-function actionBarHtml(post) {
-  const canEdit = state.me && (state.me.id === post.user_id || isStaff());
-
-  return `
-    <div class="action-bar">
-      ${canEdit ? `<button class="action" data-edit-post="${post.id}">Edit</button>` : ''}
-      ${state.me ? `<button class="action" data-report-post="${post.id}">Report</button>` : ''}
-      ${isStaff() ? `<button class="action danger" data-admin-post="${post.id}" data-admin-action="delete">Delete</button>` : ''}
-    </div>
-  `;
-}
-
-function postHtml(post) {
-  const edited = post.updated_at > post.created_at ? '<span class="edited">(edited)</span>' : '';
-
-  return `
-    <article class="post" id="post-${post.id}">
-      ${avatarHtml(post.username)}
-      <div class="post-main">
-        <div class="feed-head">
-          <span class="feed-name">${userLink(post.username)}</span>
-          ${post.is_admin ? '<span class="chip green">admin</span>' : ''}
-          <span class="muted">· ${time(post.created_at)} ${edited}</span>
-        </div>
-
-        <div class="post-body">${mdToHtml(post.body)}</div>
-
-        ${state.me ? reactionsHtml(post) : ''}
-        ${actionBarHtml(post)}
-      </div>
-    </article>
-  `;
-}
-
-function replyFormHtml(thread) {
-  if (!state.me) return `<p class="notice"><a href="#/login">Log in</a> to reply.</p>`;
-  if (thread.is_locked && !isStaff()) return `<p class="notice warn">Thread is locked.</p>`;
-
-  return `
-    <form id="reply-form" class="form">
-      <label>
-        Reply
-        <textarea id="reply-body" maxlength="10000" required minlength="1"></textarea>
-      </label>
-      <p class="muted">Markdown: **bold**, *italic*, \`code\`, \`\`\`blocks\`\`\`, lists, &gt; quotes, [link](https://...), @mentions, #tags in titles</p>
-      <button class="btn" type="submit">Reply</button>
-      <div id="reply-error" class="form-error"></div>
-    </form>
-  `;
-}
-
-function renderThread(id, query) {
-  return async function threadView() {
-    const threadId = Number(id);
-    if (!Number.isInteger(threadId)) throw new Error('Invalid thread');
-
-    const page = Math.max(1, Number(query.get('page') || 1) || 1);
-
-    const [{ thread }, postsData] = await Promise.all([
-      api(`/api/thread?id=${threadId}`),
-      api(`/api/posts?threadId=${threadId}&page=${page}`)
-    ]);
-
-    const posts = postsData.posts || [];
-    const base = `#/thread/${threadId}`;
-
-    app.innerHTML = `
-      <section class="page-head">
-        <div>
-          <h1>${esc(thread.title)}</h1>
-          <div class="feed-tags">
-            <a class="chip" href="#/category/${encodeURIComponent(thread.category_slug)}">${esc(thread.category_name)}</a>
-            ${(thread.tags || []).map((tag) => `<a class="chip tag" href="#/tag/${encodeURIComponent(tag)}">#${esc(tag)}</a>`).join('')}
-            <span class="muted">by ${userLink(thread.author)} · ${time(thread.created_at)}</span>
-          </div>
-        </div>
-      </section>
-
-      ${threadAdminHtml(thread)}
-
-      <section>${posts.map(postHtml).join('')}</section>
-
-      ${paginationHtml(base, page, Boolean(postsData.hasMore))}
-
-      <section class="card">
-        <h2>Reply</h2>
-        ${replyFormHtml(thread)}
-      </section>
-    `;
-
-    bindThreadPage(thread, posts);
-  };
-}
-
-function bindThreadPage(thread, posts) {
-  const replyForm = document.getElementById('reply-form');
-
-  if (replyForm) {
-    replyForm.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const errorEl = document.getElementById('reply-error');
-      const body = document.getElementById('reply-body').value;
-
-      try {
-        await api('/api/posts', { method: 'POST', body: JSON.stringify({ threadId: thread.id, body }) });
-        toast('Reply published');
-        await render();
-      } catch (error) {
-        errorEl.textContent = error.message;
-      }
-    });
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.menu-wrap')) closeMenus();
+  if (!e.target.closest('.share-menu') && !e.target.closest('[data-share-url]')) {
+    shareMenu?.classList.add('hidden');
   }
-
-  document.querySelectorAll('[data-report-post]').forEach((button) => {
-    button.addEventListener('click', () => openReportModal(Number(button.dataset.reportPost)));
-  });
-
-  document.querySelectorAll('[data-edit-post]').forEach((button) => {
-    button.addEventListener('click', () => {
-      const post = posts.find((p) => p.id === Number(button.dataset.editPost));
-      if (post) startEditPost(post);
-    });
-  });
-
-  document.querySelectorAll('[data-react-post]').forEach((button) => {
-    button.addEventListener('click', async () => {
-      try {
-        await api('/api/react', {
-          method: 'POST',
-          body: JSON.stringify({ postId: Number(button.dataset.reactPost), emoji: button.dataset.reactEmoji })
-        });
-        await render();
-      } catch (error) {
-        toast(error.message, true);
-      }
-    });
-  });
-
-  document.querySelectorAll('[data-admin-thread]').forEach((button) => {
-    button.addEventListener('click', () => adminAction('thread', Number(button.dataset.adminThread), button.dataset.adminAction));
-  });
-
-  document.querySelectorAll('[data-admin-post]').forEach((button) => {
-    button.addEventListener('click', () => adminAction('post', Number(button.dataset.adminPost), button.dataset.adminAction));
-  });
-}
-
-function startEditPost(post) {
-  const article = document.getElementById(`post-${post.id}`);
-  if (!article) return;
-
-  const bodyEl = article.querySelector('.post-body');
-
-  bodyEl.innerHTML = `
-    <textarea id="edit-body-${post.id}" maxlength="10000">${esc(post.body)}</textarea>
-    <div class="admin-controls">
-      <button class="btn small" data-edit-save="${post.id}">Save</button>
-      <button class="btn ghost small" data-edit-cancel="${post.id}">Cancel</button>
-    </div>
-    <div class="form-error" id="edit-error-${post.id}"></div>
-  `;
-
-  document.querySelector(`[data-edit-save="${post.id}"]`).addEventListener('click', async () => {
-    const newBody = document.getElementById(`edit-body-${post.id}`).value;
-    const errorEl = document.getElementById(`edit-error-${post.id}`);
-
-    try {
-      await api('/api/posts', { method: 'PATCH', body: JSON.stringify({ postId: post.id, body: newBody }) });
-      toast('Post updated');
-      await render();
-    } catch (error) {
-      errorEl.textContent = error.message;
-    }
-  });
-
-  document.querySelector(`[data-edit-cancel="${post.id}"]`).addEventListener('click', () => render());
-}
-
-async function adminAction(type, id, action) {
-  try {
-    await api('/api/admin', { method: 'POST', body: JSON.stringify({ type, id, action }) });
-    toast('Done');
-    await render();
-  } catch (error) {
-    toast(error.message, true);
-  }
-}
-
-function notifRowHtml(n) {
-  const icon = n.type === 'mention' ? '@' : n.type === 'reaction' ? '★' : '↩';
-
-  return `
-    <a class="feed-row ${n.read_at ? '' : 'unread'}" href="${n.thread_id ? `#/thread/${Number(n.thread_id)}` : '#/notifications'}">
-      <span class="notif-icon">${icon}</span>
-      <div class="feed-main">
-        <div class="feed-head">
-          <span class="feed-name">${n.actor ? '@' + esc(n.actor) : 'system'}</span>
-          <span class="muted">· ${n.type} · ${time(n.created_at)}</span>
-        </div>
-        ${n.thread_title ? `<div class="muted">${esc(n.thread_title)}</div>` : ''}
-      </div>
-    </a>
-  `;
-}
-
-function renderNotifications(query) {
-  return async function notificationsView() {
-    if (!state.me) { location.hash = '#/login'; return; }
-
-    const page = Math.max(1, Number(query.get('page') || 1) || 1);
-    const data = await api(`/api/notifications?page=${page}`);
-
-    api('/api/notifications/read', { method: 'POST' }).catch(() => {});
-    loadMe().then(() => { updateTopbar(); updateSidebar(); });
-
-    const items = data.notifications || [];
-
-    app.innerHTML = `
-      <section class="page-head"><h1>Notifications</h1></section>
-      ${items.length ? items.map(notifRowHtml).join('') : '<section class="empty">No notifications.</section>'}
-      ${paginationHtml('#/notifications', page, Boolean(data.hasMore))}
-    `;
-  };
-}
-
-function renderProfile(username, query) {
-  return async function profileView() {
-    const data = await api(`/api/profile?username=${encodeURIComponent(username)}`);
-    const p = data.profile;
-    const isOwn = state.me && state.me.id === p.user.id;
-    const tab = query.get('tab') === 'posts' ? 'posts' : query.get('tab') === 'mentions' ? 'mentions' : 'threads';
-
-    let content = '';
-
-    if (tab === 'threads') {
-      content = p.threads.length ? p.threads.map(threadRowHtml).join('') : '<section class="empty">No threads yet.</section>';
-    } else if (tab === 'posts') {
-      content = p.posts.length
-        ? p.posts
-            .map(
-              (post) => `
-                <article class="post">
-                  ${avatarHtml(p.user.username)}
-                  <div class="post-main">
-                    <div class="feed-head">
-                      <span class="muted">in <a href="#/thread/${Number(post.thread_id)}">${esc(post.thread_title)}</a> · ${time(post.created_at)}</span>
-                    </div>
-                    <div class="post-body">${mdToHtml(post.body.slice(0, 400))}</div>
-                  </div>
-                </article>
-              `
-            )
-            .join('')
-        : '<section class="empty">No posts yet.</section>';
-    } else {
-      content = p.mentions.length
-        ? p.mentions
-            .map(
-              (m) => `
-                <article class="post">
-                  ${avatarHtml(m.author)}
-                  <div class="post-main">
-                    <div class="feed-head">
-                      <span class="muted">mentioned by ${userLink(m.author)} in <a href="#/thread/${Number(m.thread_id)}">${esc(m.thread_title)}</a> · ${time(m.created_at)}</span>
-                    </div>
-                    <div class="post-body muted">${esc((m.body || '').slice(0, 200))}</div>
-                  </div>
-                </article>
-              `
-            )
-            .join('')
-        : '<section class="empty">No mentions yet.</section>';
-    }
-
-    app.innerHTML = `
-      <section class="profile-head">
-        ${avatarHtml(p.user.username)}
-        <div>
-          <div class="feed-head">
-            <span class="feed-name">@${esc(p.user.username)}</span>
-            ${p.user.is_admin ? '<span class="chip green">admin</span>' : ''}
-            ${p.user.is_moderator ? '<span class="chip">moderator</span>' : ''}
-          </div>
-          <div class="muted">joined ${time(p.user.created_at)} · ${p.user.thread_count} threads · ${p.user.post_count} posts</div>
-          <div class="post-body">${p.user.bio ? mdToHtml(p.user.bio) : '<span class="muted">No bio yet.</span>'}</div>
-          <div class="admin-controls">
-            ${state.me && !isOwn ? `<a class="btn small" href="#/messages/new?to=${encodeURIComponent(p.user.username)}">Send PM</a>` : ''}
-            ${isOwn ? `
-              <details>
-                <summary>Edit bio</summary>
-                <form id="bio-form" class="form">
-                  <textarea id="bio-input" maxlength="500">${esc(p.user.bio || '')}</textarea>
-                  <button class="btn small" type="submit">Save bio</button>
-                  <div id="bio-error" class="form-error"></div>
-                </form>
-              </details>
-            ` : ''}
-          </div>
-        </div>
-      </section>
-
-      <nav class="tabs">
-        <a class="tab ${tab === 'threads' ? 'active' : ''}" href="#/user/${encodeURIComponent(username)}?tab=threads">Threads</a>
-        <a class="tab ${tab === 'posts' ? 'active' : ''}" href="#/user/${encodeURIComponent(username)}?tab=posts">Posts</a>
-        <a class="tab ${tab === 'mentions' ? 'active' : ''}" href="#/user/${encodeURIComponent(username)}?tab=mentions">Mentions</a>
-      </nav>
-
-      ${content}
-    `;
-
-    const bioForm = document.getElementById('bio-form');
-
-    if (bioForm) {
-      bioForm.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const bio = document.getElementById('bio-input').value;
-        const errorEl = document.getElementById('bio-error');
-
-        try {
-          await api('/api/profile', { method: 'POST', body: JSON.stringify({ bio }) });
-          toast('Bio updated');
-          await render();
-        } catch (error) {
-          errorEl.textContent = error.message;
-        }
-      });
-    }
-  };
-}
-
-function pmRowHtml(m, box) {
-  const other = box === 'inbox' ? m.sender_username : m.recipient_username;
-  const unread = box === 'inbox' && !m.read_at;
-
-  return `
-    <a class="feed-row ${unread ? 'unread' : ''}" href="#/messages/user/${encodeURIComponent(other)}">
-      ${avatarHtml(other)}
-      <div class="feed-main">
-        <div class="feed-head"><span class="feed-name">@${esc(other)}</span><span class="muted">· ${time(m.created_at)}</span></div>
-        <div class="muted">${esc((m.body || '').slice(0, 120))}</div>
-      </div>
-    </a>
-  `;
-}
-
-function renderMessages(query) {
-  return async function messagesView() {
-    if (!state.me) { location.hash = '#/login'; return; }
-
-    const box = query.get('box') === 'outbox' ? 'outbox' : 'inbox';
-    const page = Math.max(1, Number(query.get('page') || 1) || 1);
-    const data = await api(`/api/messages?box=${box}&page=${page}`);
-    const messages = data.messages || [];
-
-    app.innerHTML = `
-      <section class="page-head">
-        <h1>Messages</h1>
-        <a class="btn small" href="#/messages/new">New message</a>
-      </section>
-
-      <nav class="tabs">
-        <a class="tab ${box === 'inbox' ? 'active' : ''}" href="#/messages?box=inbox">Inbox</a>
-        <a class="tab ${box === 'outbox' ? 'active' : ''}" href="#/messages?box=outbox">Outbox</a>
-      </nav>
-
-      ${messages.length ? messages.map((m) => pmRowHtml(m, box)).join('') : '<section class="empty">No messages.</section>'}
-
-      ${paginationHtml(`#/messages?box=${box}`, page, Boolean(data.hasMore))}
-    `;
-  };
-}
-
-function renderConversation(username, query) {
-  return async function conversationView() {
-    if (!state.me) { location.hash = '#/login'; return; }
-
-    const page = Math.max(1, Number(query.get('page') || 1) || 1);
-    const data = await api(`/api/messages?with=${encodeURIComponent(username)}&page=${page}`);
-    const messages = data.messages || [];
-
-    loadMe().then(() => { updateTopbar(); updateSidebar(); });
-
-    app.innerHTML = `
-      <section class="page-head">
-        <h1>Chat with ${userLink(data.with.username)}</h1>
-        <a class="btn ghost small" href="#/messages">Inbox</a>
-      </section>
-
-      ${messages.map((m) => postHtml({ ...m, username: m.sender_username, is_admin: false, reactions: [] })).join('') || '<section class="empty">No messages yet.</section>'}
-
-      ${paginationHtml(`#/messages/user/${encodeURIComponent(username)}`, page, Boolean(data.hasMore))}
-
-      <form id="pm-reply-form" class="form">
-        <label>
-          Message
-          <textarea id="pm-reply-body" maxlength="5000" required minlength="1"></textarea>
-        </label>
-        <button class="btn" type="submit">Send</button>
-        <div id="pm-reply-error" class="form-error"></div>
-      </form>
-    `;
-
-    document.getElementById('pm-reply-form').addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const body = document.getElementById('pm-reply-body').value;
-      const errorEl = document.getElementById('pm-reply-error');
-
-      try {
-        await api('/api/messages', { method: 'POST', body: JSON.stringify({ toUsername: username, body }) });
-        toast('Sent');
-        await render();
-      } catch (error) {
-        errorEl.textContent = error.message;
-      }
-    });
-  };
-}
-
-function renderNewMessage(query) {
-  return function newMessageView() {
-    if (!state.me) { location.hash = '#/login'; return; }
-
-    const to = query.get('to') || '';
-
-    app.innerHTML = `
-      <section class="card narrow">
-        <h1>New message</h1>
-        <form id="pm-new-form" class="form">
-          <label>To <input id="pm-to" class="input" required minlength="3" maxlength="32" value="${esc(to)}" /></label>
-          <label>Message <textarea id="pm-body" maxlength="5000" required minlength="1"></textarea></label>
-          <button class="btn" type="submit">Send</button>
-          <div id="pm-error" class="form-error"></div>
-        </form>
-      </section>
-    `;
-
-    document.getElementById('pm-new-form').addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const toUsername = document.getElementById('pm-to').value.trim();
-      const body = document.getElementById('pm-body').value;
-      const errorEl = document.getElementById('pm-error');
-
-      try {
-        await api('/api/messages', { method: 'POST', body: JSON.stringify({ toUsername, body }) });
-        toast('Sent');
-        location.hash = `#/messages/user/${encodeURIComponent(toUsername)}`;
-      } catch (error) {
-        errorEl.textContent = error.message;
-      }
-    });
-  };
-}
-
-function reportRowHtml(report) {
-  const bodyPreview = report.post_body || '';
-
-  return `
-    <article class="admin-row">
-      <div class="admin-row-head">
-        <span class="chip ${report.status === 'open' ? 'warn' : ''}">${esc(report.status)}</span>
-        <span class="muted">reported by @${esc(report.reporter)}</span>
-        <span class="muted">· ${time(report.created_at)}</span>
-      </div>
-      <p class="report-reason">Reason: ${esc(report.reason)}</p>
-      <div class="post-body muted">Post by @${esc(report.post_author)}: ${esc(bodyPreview.slice(0, 300))}${bodyPreview.length > 300 ? '…' : ''}</div>
-      <div class="feed-tags"><a href="#/thread/${Number(report.thread_id)}">Thread: ${esc(report.thread_title)}</a></div>
-      ${
-        report.status === 'open'
-          ? `
-            <div class="admin-controls">
-              <button class="btn small" data-admin-report="${report.id}" data-admin-action="resolve">Resolve</button>
-              <button class="btn ghost small" data-admin-report="${report.id}" data-admin-action="dismiss">Dismiss</button>
-            </div>
-          `
-          : ''
-      }
-    </article>
-  `;
-}
-
-function userRowHtml(user) {
-  return `
-    <article class="admin-row">
-      <div class="admin-row-head">
-        ${avatarHtml(user.username, 'small')}
-        <span class="feed-name">@${esc(user.username)}</span>
-        ${user.is_admin ? '<span class="chip green">admin</span>' : ''}
-        ${user.is_moderator ? '<span class="chip">moderator</span>' : ''}
-        ${user.banned ? '<span class="chip danger">banned</span>' : ''}
-      </div>
-      <div class="feed-tags">
-        <span class="muted">id ${user.id} · ${user.thread_count} threads · ${user.post_count} posts · since ${time(user.created_at)}</span>
-      </div>
-      <div class="admin-controls">
-        ${user.banned
-          ? `<button class="btn small" data-admin-user="${user.id}" data-admin-action="unban">Unban</button>`
-          : `<button class="btn danger small" data-admin-user="${user.id}" data-admin-action="ban">Ban</button>`}
-        ${user.is_moderator
-          ? `<button class="btn ghost small" data-admin-user="${user.id}" data-admin-action="mod_demote">Demote moderator</button>`
-          : `<button class="btn ghost small" data-admin-user="${user.id}" data-admin-action="mod_promote">Make moderator</button>`}
-      </div>
-    </article>
-  `;
-}
-
-function auditRowHtml(log) {
-  return `
-    <article class="admin-row">
-      <div class="admin-row-head">
-        <span class="chip">${esc(log.action)}</span>
-        <span class="muted">${log.username ? '@' + esc(log.username) : 'system'}</span>
-        <span class="muted">${esc(log.ip || '')}</span>
-        <span class="muted">· ${time(log.created_at)}</span>
-      </div>
-      ${log.details ? `<div class="feed-tags muted">${esc(log.details)}</div>` : ''}
-    </article>
-  `;
-}
-
-async function exportBackup() {
-  try {
-    const data = await api('/api/admin?type=export');
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `penthub-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast('Export ready');
-  } catch (error) {
-    toast(error.message, true);
-  }
-}
-
-function renderAdmin(query) {
-  return async function adminView() {
-    if (!isStaff()) {
-      app.innerHTML = '<section class="card narrow"><h1>403</h1><p class="error">Staff only.</p></section>';
-      return;
-    }
-
-    const tab = query.get('tab') === 'users' ? 'users' : query.get('tab') === 'audit' ? 'audit' : 'reports';
-    const page = Math.max(1, Number(query.get('page') || 1) || 1);
-    const status = query.get('status') || 'open';
-
-    if ((tab === 'users' || tab === 'audit') && !state.me.isAdmin) {
-      app.innerHTML = '<section class="card narrow"><h1>403</h1><p class="error">This section is admin-only.</p></section>';
-      return;
-    }
-
-    let content = '';
-
-    if (tab === 'reports') {
-      const data = await api(`/api/admin?type=reports&page=${page}&status=${encodeURIComponent(status)}`);
-      const reports = data.reports || [];
-
-      content = `
-        <div class="admin-controls">
-          <a class="btn ghost small" href="#/admin?tab=reports&status=open">Open</a>
-          <a class="btn ghost small" href="#/admin?tab=reports&status=all">All</a>
-        </div>
-      `;
-      content += reports.length ? reports.map(reportRowHtml).join('') : '<section class="empty">No reports.</section>';
-      content += paginationHtml(`#/admin?tab=reports&status=${encodeURIComponent(status)}`, page, data.hasMore);
-    } else if (tab === 'users') {
-      const q = query.get('q') || '';
-      const data = await api(`/api/admin?type=users&page=${page}&q=${encodeURIComponent(q)}`);
-      const users = data.users || [];
-
-      content = `
-        <form id="admin-user-search" class="form">
-          <input id="admin-user-q" class="input" placeholder="Search username" value="${esc(q)}" maxlength="32" />
-        </form>
-      `;
-      content += users.length ? users.map(userRowHtml).join('') : '<section class="empty">Nobody found.</section>';
-      content += paginationHtml(`#/admin?tab=users&q=${encodeURIComponent(q)}`, page, data.hasMore);
-    } else {
-      const data = await api(`/api/admin?type=audit&page=${page}`);
-      const logs = data.logs || [];
-      content = logs.length ? logs.map(auditRowHtml).join('') : '<section class="empty">Log is empty.</section>';
-      content += paginationHtml('#/admin?tab=audit', page, data.hasMore);
-    }
-
-    app.innerHTML = `
-      <section class="page-head">
-        <h1>Admin</h1>
-        ${state.me.isAdmin ? '<button id="export-btn" class="btn ghost small">Download backup (JSON)</button>' : ''}
-      </section>
-
-      <nav class="tabs">
-        <a class="tab ${tab === 'reports' ? 'active' : ''}" href="#/admin?tab=reports">Reports</a>
-        ${state.me.isAdmin ? `<a class="tab ${tab === 'users' ? 'active' : ''}" href="#/admin?tab=users">Users</a>` : ''}
-        ${state.me.isAdmin ? `<a class="tab ${tab === 'audit' ? 'active' : ''}" href="#/admin?tab=audit">Audit log</a>` : ''}
-      </nav>
-
-      ${content}
-    `;
-
-    bindAdminPage();
-  };
-}
-
-function bindAdminPage() {
-  document.querySelectorAll('[data-admin-report]').forEach((button) => {
-    button.addEventListener('click', () => adminAction('report', Number(button.dataset.adminReport), button.dataset.adminAction));
-  });
-
-  document.querySelectorAll('[data-admin-user]').forEach((button) => {
-    button.addEventListener('click', () => adminAction('user', Number(button.dataset.adminUser), button.dataset.adminAction));
-  });
-
-  const searchForm = document.getElementById('admin-user-search');
-
-  if (searchForm) {
-    searchForm.addEventListener('submit', (event) => {
-      event.preventDefault();
-      const q = document.getElementById('admin-user-q').value.trim();
-      location.hash = `#/admin?tab=users&q=${encodeURIComponent(q)}`;
-    });
-  }
-
-  document.getElementById('export-btn')?.addEventListener('click', exportBackup);
-}
+});
 
 function renderLogin() {
   return function loginView() {
@@ -1103,6 +650,7 @@ function renderLogin() {
           <div id="form-error" class="form-error"></div>
         </form>
         <p><a href="#/recover">Forgot password / recover access</a></p>
+        <p class="muted">Don't have an account? <a href="#/register">Register</a></p>
       </section>
     `;
 
@@ -1134,22 +682,44 @@ function renderRegister() {
   return function registerView() {
     app.innerHTML = `
       <section class="card narrow">
-        <h1>Register</h1>
-        <p class="muted">
-          By registering you agree to the rules: legal research only, your own devices/networks/accounts
-          or written permission. The administration is not responsible for user actions outside the platform.
-        </p>
+        <h1>Create account</h1>
+
+        <div class="notice info">
+          By registering you agree to our <a href="#/terms" target="_blank">Terms of Service</a>
+          and <a href="#/privacy" target="_blank">Privacy Policy</a>. The platform is for legal,
+          educational and authorized security research only.
+        </div>
+
         <form id="register-form" class="form">
           <label>Username <input id="register-username" class="input" autocomplete="username" required minlength="3" maxlength="32" /></label>
+          <label>Display name (optional) <input id="register-display" class="input" autocomplete="name" maxlength="40" placeholder="How others will see you" /></label>
           <label>Password <input id="register-password" class="input" type="password" autocomplete="new-password" required minlength="12" maxlength="128" /></label>
+          <div id="turnstile-box"></div>
+
           <label class="checkbox">
             <input id="register-terms" type="checkbox" required />
-            <span>I accept the <a href="#/rules" target="_blank" rel="noopener">rules</a>: educational, research and authorized security purposes only.</span>
+            <span>I accept the <a href="#/terms" target="_blank">Terms of Service</a>.</span>
           </label>
-          <div id="turnstile-box"></div>
+
+          <label class="checkbox">
+            <input id="register-privacy" type="checkbox" required />
+            <span>I accept the <a href="#/privacy" target="_blank">Privacy Policy</a>.</span>
+          </label>
+
+          <label class="checkbox">
+            <input id="register-age" type="checkbox" required />
+            <span>I confirm I am 18+ or have parental consent.</span>
+          </label>
+
+          <label class="checkbox">
+            <input id="register-legal" type="checkbox" required />
+            <span>I will use this platform only for legal, authorized research and education.</span>
+          </label>
+
           <button class="btn" type="submit">Create account</button>
           <div id="form-error" class="form-error"></div>
         </form>
+        <p class="muted">Already have an account? <a href="#/login">Log in</a></p>
       </section>
     `;
 
@@ -1158,18 +728,28 @@ function renderRegister() {
     document.getElementById('register-form').addEventListener('submit', async (event) => {
       event.preventDefault();
       const username = document.getElementById('register-username').value.trim();
+      const displayName = document.getElementById('register-display').value.trim();
       const password = document.getElementById('register-password').value;
       const acceptTerms = document.getElementById('register-terms').checked;
+      const acceptPrivacy = document.getElementById('register-privacy').checked;
+      const acceptAge = document.getElementById('register-age').checked;
+      const acceptLegal = document.getElementById('register-legal').checked;
       const errorEl = document.getElementById('form-error');
 
       try {
         const data = await api('/api/auth/register', {
           method: 'POST',
-          body: JSON.stringify({ username, password, acceptTerms, turnstileToken: state.turnstileToken || undefined })
+          body: JSON.stringify({
+            username, password, acceptTerms, acceptPrivacy, acceptAge, acceptLegal,
+            display_name: displayName,
+            turnstileToken: state.turnstileToken || undefined
+          })
         });
         state.me = await api('/api/auth/me');
         updateTopbar(); updateSidebar();
         toast('Account created');
+        localStorage.setItem('penthub_welcome_seen', '0');
+        state.welcomeSeen = false;
         location.hash = '#/';
         if (data.recoveryCode) showRecoveryModal(data.recoveryCode);
       } catch (error) {
@@ -1215,73 +795,6 @@ function renderRecover() {
   };
 }
 
-function renderNewThread(query) {
-  return async function newThreadView() {
-    if (!state.me) { location.hash = '#/login'; return; }
-
-    const categories = await ensureCategories();
-    const selectedCategory = query.get('category') || '';
-
-    app.innerHTML = `
-      <section class="card narrow">
-        <h1>New thread</h1>
-        <p class="muted">Legal research, education, CTF, defensive security or authorized pentesting only.</p>
-        <form id="new-thread-form" class="form">
-          <label>
-            Category
-            <select id="thread-category" required>
-              <option value="">Pick a category</option>
-              ${categories.map((c) => `<option value="${c.id}" ${c.slug === selectedCategory ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
-            </select>
-          </label>
-          <label>Title <input id="thread-title" class="input" required minlength="4" maxlength="160" /></label>
-          <label>Tags (comma separated, max 5) <input id="thread-tags" class="input" maxlength="120" placeholder="esp32, lab, wifi-audit" /></label>
-          <label>First post <textarea id="thread-body" required minlength="1" maxlength="10000"></textarea></label>
-          <p class="muted">Markdown: **bold**, *italic*, \`code\`, \`\`\`blocks\`\`\`, lists, &gt; quotes, [link](https://...), @mentions</p>
-          <button class="btn" type="submit">Publish</button>
-          <div id="form-error" class="form-error"></div>
-        </form>
-      </section>
-    `;
-
-    document.getElementById('new-thread-form').addEventListener('submit', async (event) => {
-      event.preventDefault();
-      const categoryId = Number(document.getElementById('thread-category').value);
-      const title = document.getElementById('thread-title').value.trim();
-      const body = document.getElementById('thread-body').value;
-      const tags = document.getElementById('thread-tags').value;
-      const errorEl = document.getElementById('form-error');
-
-      try {
-        const data = await api('/api/threads', { method: 'POST', body: JSON.stringify({ categoryId, title, body, tags }) });
-        toast('Thread created');
-        location.hash = `#/thread/${data.id}`;
-      } catch (error) {
-        errorEl.textContent = error.message;
-      }
-    });
-  };
-}
-
-function renderSearch(query) {
-  return async function searchView() {
-    const q = (query.get('q') || '').trim();
-
-    if (q.length < 3) {
-      app.innerHTML = '<section class="card narrow"><h1>Search</h1><p class="notice">Enter at least 3 characters.</p></section>';
-      return;
-    }
-
-    const data = await api(`/api/search?q=${encodeURIComponent(q)}`);
-    const results = data.results || [];
-
-    app.innerHTML = `
-      <section class="page-head"><h1>Search: ${esc(q)}</h1></section>
-      ${results.length ? results.map(threadRowHtml).join('') : '<section class="empty">Nothing found.</section>'}
-    `;
-  };
-}
-
 function renderRules() {
   return function rulesView() {
     app.innerHTML = `
@@ -1316,6 +829,59 @@ function renderRules() {
   };
 }
 
+function renderTerms() {
+  return function termsView() {
+    app.innerHTML = `
+      <section class="card narrow">
+        <h1>Terms of Service</h1>
+        <p class="muted">Last updated: 2026-08-04</p>
+        <h2>1. Acceptance</h2>
+        <p>By creating an account you accept these Terms. If you do not agree, do not use the service.</p>
+        <h2>2. Eligibility</h2>
+        <p>You must be at least 18 years old, or have parental consent, and comply with all laws applicable to you.</p>
+        <h2>3. Permitted use</h2>
+        <p>The service is for authorized security research, education, CTF and defensive security only. Any use against systems you do not own or have written permission to test is prohibited.</p>
+        <h2>4. Prohibited conduct</h2>
+        <p>You will not post, request, sell or facilitate: malware, jammers, deauth tools, brute-forcing, carding, skimming, botnets, credential dumps or similar. You will not impersonate others or share leaked credentials.</p>
+        <h2>5. User content</h2>
+        <p>You retain ownership of what you post. By posting you grant PentHub a non-exclusive license to host, display and distribute your content as part of the service.</p>
+        <h2>6. Moderation</h2>
+        <p>Staff may lock, delete or move threads, and ban users who violate the rules, without prior notice. Bans may be appealed.</p>
+        <h2>7. Disclaimer</h2>
+        <p>The service is provided "as is". The administration is not liable for actions users take outside the platform.</p>
+        <h2>8. Changes</h2>
+        <p>We may update these Terms. Continued use after a notice means acceptance.</p>
+      </section>
+    `;
+  };
+}
+
+function renderPrivacy() {
+  return function privacyView() {
+    app.innerHTML = `
+      <section class="card narrow">
+        <h1>Privacy Policy</h1>
+        <p class="muted">Last updated: 2026-08-04</p>
+        <h2>What we collect</h2>
+        <ul>
+          <li>Account data: username, display name, hashed password, recovery code hash, bio, avatar, banner.</li>
+          <li>Content you post: threads, posts, reactions, mentions, PMs, tickets.</li>
+          <li>Logs: IP address at login/registration and for audit actions.</li>
+          <li>Turnstile verification token (processed by Cloudflare).</li>
+        </ul>
+        <h2>How we use it</h2>
+        <p>To operate the service, prevent abuse, enforce the rules and investigate incidents.</p>
+        <h2>Sharing</h2>
+        <p>We do not sell data. We may share data with Cloudflare (infrastructure) and, when legally required, with authorities.</p>
+        <h2>Your rights</h2>
+        <p>You may delete your posts, change profile fields, change password and request account export via the admin (open a Support ticket).</p>
+        <h2>Retention</h2>
+        <p>Deleted posts are soft-deleted and retained for moderation. Bans, audit logs and appeals are retained for safety.</p>
+      </section>
+    `;
+  };
+}
+
 function renderNotFound() {
   return function notFoundView() {
     app.innerHTML = '<section class="card narrow"><h1>404</h1><p class="muted">Page not found.</p><p><a href="#/">Back home</a></p></section>';
@@ -1334,6 +900,8 @@ async function render() {
     const section = segments[0] || '';
 
     if (!section) await renderHome()();
+    else if (section === 'welcome') await renderWelcome()();
+    else if (section === 'section') await renderSection(segments[1], query)();
     else if (section === 'category') await renderCategory(segments[1], query)();
     else if (section === 'tag') await renderTag(segments[1], query)();
     else if (section === 'thread') await renderThread(segments[1], query)();
@@ -1344,12 +912,24 @@ async function render() {
       else if (segments[1] === 'new') renderNewMessage(query)();
       else await renderMessages(query)();
     }
+    else if (section === 'settings') await renderSettings()();
+    else if (section === 'support') await renderSupport(query)();
+    else if (section === 'ticket') await renderTicket(Number(segments[1]))();
+    else if (section === 'appeal') await renderAppeal()();
+    else if (section === 'changelog') await renderChangelog(query)();
+    else if (section === 'firmware') {
+      if (segments[1] === 'bruce' && segments[2] === 'wiki') await renderBruceWiki()();
+      else await renderFirmwareHub()();
+    }
+    else if (section === 'releases') await renderReleases()();
     else if (section === 'login') renderLogin()();
     else if (section === 'register') renderRegister()();
     else if (section === 'recover') renderRecover()();
     else if (section === 'new-thread') await renderNewThread(query)();
     else if (section === 'search') await renderSearch(query)();
     else if (section === 'rules') renderRules()();
+    else if (section === 'terms') renderTerms()();
+    else if (section === 'privacy') renderPrivacy()();
     else if (section === 'admin') await renderAdmin(query)();
     else renderNotFound()();
   } catch (error) {
@@ -1392,12 +972,8 @@ async function submitReport() {
 
 async function copyRecoveryCode() {
   const code = document.getElementById('recovery-code').textContent.trim();
-  try {
-    await navigator.clipboard.writeText(code);
-    toast('Code copied');
-  } catch {
-    toast('Copy the code manually', true);
-  }
+  try { await navigator.clipboard.writeText(code); toast('Code copied'); }
+  catch { toast('Copy the code manually', true); }
 }
 
 document.getElementById('search-form').addEventListener('submit', (event) => {
@@ -1417,7 +993,7 @@ recoveryModal.addEventListener('click', (event) => { if (event.target === recove
 window.addEventListener('hashchange', render);
 
 (async function init() {
-  await Promise.all([loadMe(), loadConfig()]);
+  await Promise.all([loadMe(), loadConfig(), ensureCategories()]);
   updateTopbar();
   await render();
 })();
