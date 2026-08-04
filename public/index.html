@@ -1,10 +1,10 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>PentHub — форум легального пентеста и hardware security</title>
-  <meta name="description" content="PentHub — форум для легальных пентестеров, CTF, ESP32, Flipper Zero, defensive security и hardware security lab." />
+  <title>PentHub — legal pentesting & hardware security forum</title>
+  <meta name="description" content="PentHub — a forum for legal pentesters, CTF players, ESP32, Flipper Zero, defensive security and hardware security labs." />
   <link rel="stylesheet" href="/styles.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>" />
 </head>
@@ -16,14 +16,14 @@
       <input
         id="search-input"
         type="search"
-        placeholder="Поиск по форуму"
+        placeholder="Search the forum"
         minlength="3"
         maxlength="64"
         class="input"
       />
     </form>
 
-    <nav id="auth-area" class="auth-area" aria-label="Пользовательское меню"></nav>
+    <nav id="auth-area" class="auth-area" aria-label="User menu"></nav>
   </header>
 
   <main id="app" class="container" aria-live="polite"></main>
@@ -31,38 +31,38 @@
   <footer class="footer">
     <div class="container">
       <p>
-        PentHub — площадка для легальных исследований, обучения и defensive security.
-        Любые действия вне закона и без письменного разрешения запрещены.
+        PentHub is a platform for legal research, education and defensive security.
+        Any actions outside the law or without written permission are prohibited.
       </p>
       <p>
-        <a href="#/rules">Правила</a>
+        <a href="#/rules">Rules</a>
       </p>
     </div>
   </footer>
 
-  <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Жалоба">
+  <div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Report">
     <div class="modal-card">
-      <h3>Жалоба на сообщение</h3>
-      <p class="muted">Опиши нарушение. Администрация проверит контент.</p>
-      <textarea id="modal-reason" class="input" maxlength="500" placeholder="Причина жалобы"></textarea>
+      <h3>Report a post</h3>
+      <p class="muted">Describe the violation. Staff will review the content.</p>
+      <textarea id="modal-reason" class="input" maxlength="500" placeholder="Reason"></textarea>
       <div class="modal-actions">
-        <button id="modal-cancel" class="btn ghost" type="button">Отмена</button>
-        <button id="modal-send" class="btn danger" type="button">Отправить</button>
+        <button id="modal-cancel" class="btn ghost" type="button">Cancel</button>
+        <button id="modal-send" class="btn danger" type="button">Send</button>
       </div>
     </div>
   </div>
 
-  <div id="recovery-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Код восстановления">
+  <div id="recovery-modal" class="modal hidden" role="dialog" aria-modal="true" aria-label="Recovery code">
     <div class="modal-card">
-      <h3>Код восстановления доступа</h3>
+      <h3>Recovery code</h3>
       <p class="muted">
-        Сохрани его в надёжном месте (менеджер паролей, сейф). Это ЕДИНСТВЕННЫЙ способ
-        восстановить доступ без почты. Показывается один раз.
+        Store it in a safe place (password manager, vault). This is the ONLY way to recover
+        access without email. Shown once.
       </p>
       <pre class="notice" id="recovery-code"></pre>
       <div class="modal-actions">
-        <button id="recovery-copy" class="btn ghost" type="button">Скопировать</button>
-        <button id="recovery-close" class="btn" type="button">Я сохранил</button>
+        <button id="recovery-copy" class="btn ghost" type="button">Copy</button>
+        <button id="recovery-close" class="btn" type="button">I saved it</button>
       </div>
     </div>
   </div>
