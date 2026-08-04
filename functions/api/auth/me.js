@@ -12,13 +12,20 @@ export async function onRequest({ request, env }) {
       return json({ error: 'Unauthorized' }, 401);
     }
 
-    const unread = await env.DB.prepare(
-      'SELECT COUNT(*) AS c FROM private_messages WHERE recipient_id = ? AND read_at IS NULL'
-    )
-      .bind(user.id)
-      .first();
+    const [unread, notifications] = await Promise.all([
+      env.DB.prepare('SELECT COUNT(*) AS c FROM private_messages WHERE recipient_id = ? AND read_at IS NULL')
+        .bind(user.id)
+        .first(),
+      env.DB.prepare('SELECT COUNT(*) AS c FROM notifications WHERE user_id = ? AND read_at IS NULL')
+        .bind(user.id)
+        .first()
+    ]);
 
-    return json({ ...user, unread_count: Number(unread?.c || 0) });
+    return json({
+      ...user,
+      unread_count: Number(unread?.c || 0),
+      notifications_unread: Number(notifications?.c || 0)
+    });
   } catch {
     return json({ error: 'Internal error' }, 500);
   }
